@@ -1,0 +1,240 @@
+<!--
+  Copyright 2017, Bart Butenaers
+  Licensed under the Apache License, Version 2.0 (the "License");
+  you may not use this file except in compliance with the License.
+  You may obtain a copy of the License at
+  http://www.apache.org/licenses/LICENSE-2.0
+  Unless required by applicable law or agreed to in writing, software
+  distributed under the License is distributed on an "AS IS" BASIS,
+  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+  See the License for the specific language governing permissions and
+  limitations under the License.
+-->
+
+<script type="text/x-red" data-template-name="multipart-encoder">
+    <div class="form-row">
+        <label for="node-input-statusCode"><i class="fa fa-long-arrow-left"></i> Status code</label>
+        <input type="text" id="node-input-statusCode" placeholder="msg.statusCode">
+    </div>
+    <div class="form-row">
+        <label for="node-input-destination"><i class="fa fa-film"></i> Destination</label>
+        <select type="text" id="node-input-destination" style="width:70%;">
+            <option value="single">Single client<option>
+            <option value="all">All clients</option>
+        </select>
+    </div>    
+    <div class="form-row" style="margin-bottom:0;">
+        <label><i class="fa fa-list"></i> Global headers</label>
+    </div>
+    <div class="form-row node-input-global-headers-container-row">
+        <ol id="node-input-global-headers-container"></ol>
+    </div>
+    </br>
+    <div class="form-row" style="margin-bottom:0;">
+        <label><i class="fa fa-list"></i> Part headers</label>
+    </div>
+    <div class="form-row node-input-part-headers-container-row">
+        <ol id="node-input-part-headers-container"></ol>
+    </div>
+    </br>
+    <div class="form-row">
+        <label for="node-input-name"><i class="icon-tag"></i> Name</label>
+        <input type="text" id="node-input-name" placeholder="Name">
+    </div>
+</script>
+
+<script type="text/x-red" data-help-name="multipart-encoder">
+    <p>Sends an infinite response stream back to requests received from an HTTP Input node.</p>
+
+    <h3>Inputs</h3>
+    <dl class="message-properties">
+        <dt>payload <span class="property-type">string</span></dt>
+        <dd>The body of the response part.  This will be ignored for the first message (which sets up the stream for a request).</dd>
+        <dt class="optional">statusCode <span class="property-type">number</span></dt>
+        <dd>If set, this is used as the response status code. Default: 200.</dd>
+        <dt class="optional"> headers <span class="property-type">object</span></dt>
+        <dd>If set, provides HTTP headers to include in the response. This field can contain global headers or part headers:
+        <ul>
+          <li><b>Global headers</b>: The headers in the first message (for a new request) will be used as global headers.  These
+                 global headers will be included at the start of the stream.  These can not be changed once the streaming has started.</li>
+          <li><b>Part headers</b>: The headers in the next messages (for the same request) will be used as part headers.  These
+                 part headers will be included in the new part of the stream.</li>
+        </ul></dd>
+        <dt class="optional">cookies <span class="property-type">object</span></dt>
+        <dd>If set, can be used to set or delete cookies.</dd>
+    </dl>
+    <h3>Details</h3>
+    <p>The <code>statusCode</code>, <code>headers</code> (both global headers 
+    and part headers) can also be set in the node config window. If one of these properties has been set
+    within the node config window, it cannot be overridden by the corresponding property in the input message.
+    When part headers are set in the node config window, these will be included in every part of the stream.</p>
+    <p>The <code>destination</code> specifies how the payloads in the messages are streamed to the responses:</p>
+    <ul>
+      <li><b>Single client</b>: A payload is streamed only for the request that is specified in the same input message.  
+      This allows to setup a separate stream for each request individually.  Which means each request gets the entire
+      stream from the start.</li>
+      <li><b>All clients</b>:A payload is streamed to all requests that have been passed to the node (by previous messages).  
+      This allows to setup a stream that is shared for all requests simultaneously.  Which means each request gets the same 
+      stream, starting from the point where they hook in to the already running stream (and not from the start of the stream !).</li>
+    </ul>       
+    <h4>Cookie handling</h4>
+    <p>The <code>cookies</code> property must be an object of name/value pairs.
+    The value can be either a string to set the value of the cookie with default options, or it 
+    can be an object of options.  See HTTP Input node for more information about cookies.<p>
+</script>
+
+<script type="text/javascript">
+(function() {
+    RED.nodes.registerType('multipart-encoder',{
+        category: 'output',
+        color:"rgb(231, 231, 174)",
+        defaults: {
+            name: {value:""},
+            statusCode: {value:"",validate: RED.validators.number(true)},
+            // Add some default global http headers, which are required for multipart streaming
+            globalHeaders: {value:{"Content-Type":"multipart/x-mixed-replace;boundary=--myboundary",
+                                   "Connection":"keep-alive",
+                                   "Expires":"Fri, 01 Jan 1990 00:00:00 GMT",
+                                   "Cache-Control":"no-cache, no-store, max-age=0, must-revalidate",
+                                   "Pragma":"no-cache"}},         
+            partHeaders: {value:{"Content-Type":"image/jpeg"}},                                   
+            destination: {value:"independent", required: true}
+        },
+        inputs:1,
+        outputs:0,
+        align: "right",
+        icon: "white-globe.png",
+        label: function() {
+            return this.name||("http"+(this.statusCode?" ("+this.statusCode+")":""));
+        },
+        labelStyle: function() {
+            return this.name?"node_label_italic":"";
+        },
+        oneditprepare: function() {
+            function resizeRule(rule) {
+                var newWidth = rule.width();
+                rule.find('.red-ui-typedInput').typedInput("width",(newWidth-15)/2);
+
+            }
+            var globalHeaderList = $("#node-input-global-headers-container").css('min-height','150px').css('min-width','450px').editableList({
+                addItem: function(container,i,header) {
+                    // Add a new row to the html table
+                    var row = $('<div/>').appendTo(container);
+                    
+                    // Add a text field to the new row, that represents the header name (type string)
+                    var propertyName = $('<input/>',{class:"node-input-header-name",type:"text"})
+                        .appendTo(row)
+                        .typedInput({default:'str',types:['str']});
+                        
+                    // Add a text field to the new row, that represents the header value (type string)
+                    var propertyValue = $('<input/>',{class:"node-input-header-value",type:"text",style:"margin-left: 10px"})
+                        .appendTo(row)
+                        .typedInput({default:'str',types:['str']});
+
+                    // Display the specified header name and value (from the node) in the respective text fields
+                    propertyName.typedInput('value',header.name);
+                    propertyValue.typedInput('value',header.value);
+
+                    resizeRule(container);
+                },
+                resizeItem: resizeRule,
+                removable: true
+            });
+
+            // Show all the global headers from the node in the html table
+            if (this.globalHeaders) {
+                for (var headerName in this.globalHeaders) {
+                    if (this.globalHeaders.hasOwnProperty(headerName)) {
+                        var headerValue = this.globalHeaders[headerName];
+                        globalHeaderList.editableList('addItem',{name:headerName,value:headerValue});
+                    }
+                }
+            }
+            
+            var partHeaderList = $("#node-input-part-headers-container").css('min-height','150px').css('min-width','450px').editableList({
+                addItem: function(container,i,header) {
+                    // Add a new row to the html table
+                    var row = $('<div/>').appendTo(container);
+                    
+                    // Add a text field to the new row, that represents the header name (type string)
+                    var propertyName = $('<input/>',{class:"node-input-header-name",type:"text"})
+                        .appendTo(row)
+                        .typedInput({default:'str',types:['str']});
+                        
+                    // Add a text field to the new row, that represents the header value (type string)
+                    var propertyValue = $('<input/>',{class:"node-input-header-value",type:"text",style:"margin-left: 10px"})
+                        .appendTo(row)
+                        .typedInput({default:'str',types:['str']});
+
+                    // Display the specified header name and value (from the node) in the respective text fields
+                    propertyName.typedInput('value',header.name);
+                    propertyValue.typedInput('value',header.value);
+
+                    resizeRule(container);
+                },
+                resizeItem: resizeRule,
+                removable: true
+            });
+
+            // Show all the part headers from the node in the html table
+            if (this.partHeaders) {
+                for (var headerName in this.partHeaders) {
+                    if (this.partHeaders.hasOwnProperty(headerName)) {
+                        var headerValue = this.partHeaders[headerName];
+                        partHeaderList.editableList('addItem',{name:headerName,value:headerValue});
+                    }
+                }
+            }
+        },
+        oneditsave: function() {
+            var globalHeaderList = $("#node-input-global-headers-container").editableList('items');
+            var node = this;
+            node.globalHeaders = {};
+            
+            // Copy all the header name/value pairs from the html table to the node
+            globalHeaderList.each(function(i) {
+                var header = $(this);
+                var headerName  = header.find(".node-input-header-name").typedInput('value');
+                var headerValue = header.find(".node-input-header-value").typedInput('value');
+                if (headerName !== '') {
+                    node.globalHeaders[headerName] = headerValue;
+                }
+            });
+            
+            var partHeaderList = $("#node-input-part-headers-container").editableList('items');
+            node.partHeaders = {};
+            
+            // Copy all the header name/value pairs from the html table to the node
+            partHeaderList.each(function(i) {
+                var header = $(this);
+                var headerName  = header.find(".node-input-header-name").typedInput('value');
+                var headerValue = header.find(".node-input-header-value").typedInput('value');
+                if (headerName !== '') {
+                    node.partHeaders[headerName] = headerValue;
+                }
+            });
+        },
+        oneditresize: function(size) {
+            // Resize global headers list
+            var rows = $("#dialog-form>div:not(.node-input-global-headers-container-row)");
+            var height = size.height;
+            for (var i=0; i<rows.size(); i++) {
+                height -= $(rows[i]).outerHeight(true);
+            }
+            var editorRow = $("#dialog-form>div.node-input-global-headers-container-row");
+            height -= (parseInt(editorRow.css("marginTop"))+parseInt(editorRow.css("marginBottom")));
+            $("#node-input-global-headers-container").editableList('height',height);
+            
+            // Resize part headers list
+            rows = $("#dialog-form>div:not(.node-input-part-headers-container-row)");
+            height = size.height;
+            for (var i=0; i<rows.size(); i++) {
+                height -= $(rows[i]).outerHeight(true);
+            }
+            editorRow = $("#dialog-form>div.node-input-part-headers-container-row");
+            height -= (parseInt(editorRow.css("marginTop"))+parseInt(editorRow.css("marginBottom")));
+            $("#node-input-part-headers-container").editableList('height',height);
+        }
+    });
+})();
+</script>
