@@ -18,20 +18,25 @@
     </div>
     <div class="form-row">
         <label for="node-input-destination"><i class="fa fa-film"></i> Destination</label>
-        <select type="text" id="node-input-destination" style="width:70%;">
+        <select id="node-input-destination" style="width:70%;">
             <option value="single">Single client<option>
             <option value="all">All clients</option>
         </select>
     </div>    
+    <div class="form-row">
+        <label>&nbsp;</label>
+        <input type="checkbox" id="node-input-ignoreHeaders" style="display: inline-block; width: auto; vertical-align: top;">
+        <label for="node-input-ignoreHeaders" style="width:70%;"> Ignore headers in input message</label>
+    </div>    
     <div class="form-row" style="margin-bottom:0;">
-        <label><i class="fa fa-list"></i> Global headers</label>
+        <label><i class="fa fa-list"></i> Global header</label>
     </div>
     <div class="form-row node-input-global-headers-container-row">
         <ol id="node-input-global-headers-container"></ol>
     </div>
     </br>
     <div class="form-row" style="margin-bottom:0;">
-        <label><i class="fa fa-list"></i> Part headers</label>
+        <label><i class="fa fa-list"></i> Part header</label>
     </div>
     <div class="form-row node-input-part-headers-container-row">
         <ol id="node-input-part-headers-container"></ol>
@@ -68,7 +73,8 @@
     and part headers) can also be set in the node config window. If one of these properties has been set
     within the node config window, it cannot be overridden by the corresponding property in the input message.
     When part headers are set in the node config window, these will be included in every part of the stream.</p>
-    <p>The <code>destination</code> specifies how the payloads in the messages are streamed to the responses:</p>
+    <p>The <code>Ignore headers in input message</code> allows to ignore the <b>msg.headers</b> field, in case these headers are not relevant.</p>
+    <p>The <code>destination</code> specifies how the payloads in the messages are streamed to the responses:
     <ul>
       <li><b>Single client</b>: A payload is streamed only for the request that is specified in the same input message.  
       This allows to setup a separate stream for each request individually.  Which means each request gets the entire
@@ -76,7 +82,7 @@
       <li><b>All clients</b>:A payload is streamed to all requests that have been passed to the node (by previous messages).  
       This allows to setup a stream that is shared for all requests simultaneously.  Which means each request gets the same 
       stream, starting from the point where they hook in to the already running stream (and not from the start of the stream !).</li>
-    </ul>       
+    </ul></p>
     <h4>Cookie handling</h4>
     <p>The <code>cookies</code> property must be an object of name/value pairs.
     The value can be either a string to set the value of the cookie with default options, or it 
@@ -91,6 +97,7 @@
         defaults: {
             name: {value:""},
             statusCode: {value:"",validate: RED.validators.number(true)},
+            ignoreHeaders: {value:true},
             // Add some default global http headers, which are required for multipart streaming
             globalHeaders: {value:{"Content-Type":"multipart/x-mixed-replace;boundary=--myboundary",
                                    "Connection":"keep-alive",
@@ -98,14 +105,14 @@
                                    "Cache-Control":"no-cache, no-store, max-age=0, must-revalidate",
                                    "Pragma":"no-cache"}},         
             partHeaders: {value:{"Content-Type":"image/jpeg"}},                                   
-            destination: {value:"independent", required: true}
+            destination: {value:"all"}
         },
         inputs:1,
-        outputs:0,
+        outputs:1,
         align: "right",
-        icon: "white-globe.png",
+        icon: "encoder.png",
         label: function() {
-            return this.name||("http"+(this.statusCode?" ("+this.statusCode+")":""));
+            return this.name || ("encoder"+(this.statusCode?" ("+this.statusCode+")":""));
         },
         labelStyle: function() {
             return this.name?"node_label_italic":"";
@@ -113,7 +120,7 @@
         oneditprepare: function() {
             function resizeRule(rule) {
                 var newWidth = rule.width();
-                rule.find('.red-ui-typedInput').typedInput("width",(newWidth-15)/2);
+                rule.find('.red-ui-typedInput').typedInput("width",(newWidth-30)/2);
 
             }
             var globalHeaderList = $("#node-input-global-headers-container").css('min-height','150px').css('min-width','450px').editableList({
