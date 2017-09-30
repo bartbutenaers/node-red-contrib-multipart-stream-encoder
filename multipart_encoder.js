@@ -16,14 +16,29 @@
 
 module.exports = function(RED) {
     "use strict";
-    //var hashSum = require("hash-sum");
+    
+    function cleanupResponse(node, msg) {
+        //  Remove the response object from the array, since streaming is not required anymore
+        var index = node.responses.indexOf(msg.res);
+        if (index > -1) {
+            node.responses.splice(index, 1);
+        }
+        
+        // Remove the 'streaming ..' status text when no responses are left to stream to
+        if (node.responses.length == 0) {
+            node.status({});
+        }
+        
+        node.send({res: msg.res});
+    }
 
     function MultiPartEncoder(n) {
         RED.nodes.createNode(this,n);
         this.globalHeaders = n.globalHeaders || {};
-        this.partHeaders  = n.partHeaders || {};
+        this.partHeaders   = n.partHeaders || {};
         this.statusCode    = n.statusCode || 200;
         this.destination   = n.destination;
+        this.ignoreHeaders = n.ignoreHeaders;
         this.responses     = [];
         this.nodeProgress  = '';
         this.timestamp     = 0;
@@ -36,6 +51,14 @@ module.exports = function(RED) {
                 return; 
             }
             
+            // When msg.res = true (in case of a single destination), the specified response will be ended.
+            // The disconnection handler below will make sure that everything is cleaned up ...
+            if (msg.res && msg.hasOwnProperty('stop') && msg.stop == true) {
+                msg.res._res.end();                              
+                cleanupResponse(node, msg);         
+                return;
+            }
+
             // --------------------------------
             // First message of a stream
             // --------------------------------
@@ -46,10 +69,10 @@ module.exports = function(RED) {
                 var globalHeaders = RED.util.cloneMessage(node.globalHeaders);
                 
                 // Headers specified in the msg.headers will be used, but cannot override headers from the config screen
-                if (msg.headers) {
+                if (msg.headers && node.ignoreHeaders == false) {
                     for (var headerName in msg.headers) {
                         if (msg.headers.hasOwnProperty(headerName) && !globalHeaders.hasOwnProperty(headerName)) {
-                            globalHeaders[headerName] = msg.headers[heaheaderNameder];
+                            globalHeaders[headerName] = msg.headers[headerName];
                         }
                     }
                 }
@@ -76,23 +99,17 @@ module.exports = function(RED) {
                     }
                 }
 
-                // Apply the global headers to the response object (which is specified in the message)
+                // Store the response object in an array, for use later one
                 node.responses.push(msg.res);
                 
                 // When the connection is closed afterwards ...
                 // This happens e.g. when the browser page is closed, when the browser page is manually refreshed, ...
+                // We don't handle the 'end' (= closed normally) event, because afterwards the 'close' (= close unexpectly) event seems also to be triggered.
+                // Remark: these 'close' and 'end' events are NOT triggered when we call msg.res._res.end()
+                // Remark: it might be useful in the future to call emitter.setMaxListeners() to increase limit of 11 listeners??
                 msg.res._res.connection.on('close', function() { 
-                    //  Remove the response object from the array, since streaming is not required anymore
-                    var index = node.responses.indexOf(msg.res);
-                    if (index > -1) {
-                        node.responses.splice(index, 1);
-                    }
-                    
-                    // Remove the 'streaming ..' status text when no responses are left to stream to
-                    if (node.responses.length == 0) {
-                        node.status({});
-                    }
-                });
+                    cleanupResponse(node, msg);
+                })
                  
                 msg.res._res.status(node.statusCode);
             }                        
@@ -162,8 +179,18 @@ module.exports = function(RED) {
             }
         });
         
-        node.on("close", function() {
-            //node.responses.clear();
+        node.on("close", function() { 
+            // After a (re)deploy, this node will start again with an empty 'responses' array.  We should end all connections,
+            // because otherwise the clients would keep waiting/hanging infinitly for a response.
+            for (var key in node.responses) {
+                var response = node.responses[key];
+                response._res.end();
+            }
+            
+            // Remove all the responses from the array
+            node.responses.length = 0;
+            
+            // Don't show 'streaming' status anymore
             node.status({});
         });
     }
