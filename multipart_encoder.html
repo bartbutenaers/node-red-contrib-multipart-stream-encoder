@@ -27,7 +27,22 @@
         <label>&nbsp;</label>
         <input type="checkbox" id="node-input-ignoreHeaders" style="display: inline-block; width: auto; vertical-align: top;">
         <label for="node-input-ignoreHeaders" style="width:70%;"> Ignore headers in input message</label>
-    </div>    
+    </div>   
+    <div class="form-row">
+        <label>&nbsp;</label>
+        <input type="checkbox" id="node-input-ignoreMessages" style="display: inline-block; width: auto; vertical-align: top;">
+        <label for="node-input-ignoreMessages" style="width:70%;"> Ignore messages if stream is overloaded</label>
+    </div>       
+    <div class="form-row">
+        <label>&nbsp;</label>
+        <input type="checkbox" id="node-input-outputIfSingle" style="display: inline-block; width: auto; vertical-align: top;">
+        <label for="node-input-outputIfSingle" style="width:70%;"> Output message for every closed connection</label>
+    </div>       
+    <div class="form-row">
+        <label>&nbsp;</label>
+        <input type="checkbox" id="node-input-outputIfAll" style="display: inline-block; width: auto; vertical-align: top;">
+        <label for="node-input-outputIfAll" style="width:70%;"> Output message when all connections closed</label>
+    </div>       
     <div class="form-row" style="margin-bottom:0;">
         <label><i class="fa fa-list"></i> Global header</label>
     </div>
@@ -74,6 +89,9 @@
     within the node config window, it cannot be overridden by the corresponding property in the input message.
     When part headers are set in the node config window, these will be included in every part of the stream.</p>
     <p>The <code>Ignore headers in input message</code> allows to ignore the <b>msg.headers</b> field, in case these headers are not relevant.</p>
+    <p>The <code>Ignore messages if stream is overloaded</code> allows to ignore the input messages, when the stream buffer is consuming too much memory.</p>
+    <p>The <code>Output message for every closed connection</code> allows to create an output messages, which have a <code>msg.res</code> field containing the closed response object.</p>
+    <p>The <code>Output message when all connections closed</code> allows to create an output message, which contains <b>no</b> link to the closed response objects.</p>     
     <p>The <code>destination</code> specifies how the payloads in the messages are streamed to the responses:
     <ul>
       <li><b>Single client</b>: A payload is streamed only for the request that is specified in the same input message.  
@@ -98,6 +116,9 @@
             name: {value:""},
             statusCode: {value:"",validate: RED.validators.number(true)},
             ignoreHeaders: {value:true},
+            ignoreMessages: {value:true},
+            outputIfSingle: {value:false},
+            outputIfAll: {value:false},
             // Add some default global http headers, which are required for multipart streaming
             globalHeaders: {value:{"Content-Type":"multipart/x-mixed-replace;boundary=--myboundary",
                                    "Connection":"keep-alive",
