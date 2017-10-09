@@ -45,7 +45,6 @@ module.exports = function(RED) {
         this.partHeaders    = n.partHeaders || {};
         this.statusCode     = n.statusCode || 200;
         this.destination    = n.destination;
-        this.ignoreHeaders  = n.ignoreHeaders;
         this.ignoreMessages = n.ignoreMessages;
         this.outputIfSingle = n.outputIfSingle;
         this.outputIfAll    = n.outputIfAll;
@@ -78,20 +77,10 @@ module.exports = function(RED) {
             // When a new response object is being registered (the first time), we will setup the GLOBAL http headers and cookies.
             // Once the stream is started, changing the global headers would result in an error: Can't set headers after they are sent.
             if (msg.res && !node.responses.has(msg.res)) { 
-                // Start with the global headers specified in the config screen
-                var globalHeaders = RED.util.cloneMessage(node.globalHeaders);
-                
-                // Headers specified in the msg.headers will be used, but cannot override headers from the config screen
-                if (msg.headers && node.ignoreHeaders == false) {
-                    for (var headerName in msg.headers) {
-                        if (msg.headers.hasOwnProperty(headerName) && !globalHeaders.hasOwnProperty(headerName)) {
-                            globalHeaders[headerName] = msg.headers[headerName];
-                        }
-                    }
-                }
-                
-                if (Object.keys(globalHeaders).length > 0) {
-                    msg.res._res.set(globalHeaders);
+                // Set the global headers from the config screen.  We cannot override these with msg.headers because we have no way
+                // to determine which are global headers or part headers.
+                if (Object.keys(node.globalHeaders).length > 0) {
+                    msg.res._res.set(node.globalHeaders);
                 }
                 
                 // The cookies can only be set at the start of the stream
@@ -201,18 +190,6 @@ module.exports = function(RED) {
                     node.warn('Only strings and buffers can be streamed, not payload type ' + typeof(msg.payload));  
                     return;
                 }
-                
-                // Start with the part headers specified in the config screen
-                var partHeaders = RED.util.cloneMessage(node.partHeaders);
-                
-                // Headers specified in the msg.headers will be used, but cannot override headers from the config screen
-                if (msg.headers && node.ignoreHeaders == false) {
-                    for (var headerName in msg.headers) {
-                        if (msg.headers.hasOwnProperty(headerName) && !partHeaders.hasOwnProperty(headerName)) {
-                            partHeaders[headerName] = msg.headers[headerName];
-                        }
-                    }
-                }   
                     
                 // Send data (from the payload) to the stream.  
                 if (relevantResponses.size > 0) {
@@ -226,10 +203,12 @@ module.exports = function(RED) {
                             relevantResponse._res.write('--myboundary');  
                             relevantResponse._res.write('\r\n');    
                             
-                            for (var partHeaderName in partHeaders) {
+                            // Set the part headers from the config screen.  We cannot override these with msg.headers because we have no way
+                            // to determine which are global headers or part headers.
+                            for (var partHeaderName in node.partHeaders) {
                                 // Set all the specified part headers, except for the content-lenth (which we will determine ourselves anyway ...
                                 if (partHeaderName.toLowerCase() != "content-length") {
-                                    var partHeaderValue = partHeaders[partHeaderName];
+                                    var partHeaderValue = node.partHeaders[partHeaderName];
                                     relevantResponse._res.write(partHeaderName + ': ' + partHeaderValue);
                                     relevantResponse._res.write('\r\n'); 
                                 }                          
