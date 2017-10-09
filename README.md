@@ -12,14 +12,14 @@ This node works closely together with the http-in node.
 
 The goal is to setup a stream over http, to create a continous sequence of data elements.  These elements can create any kind of data (text, images, ...). One of the most known examples is an **MJPEG stream**, to receive continously JPEG images (like a video stream).  
 
-For example, the encoder converts separate messages (i.e. images in their payloads) into a continous MJPEG stream:
+***The encoder converts (payloads from) separate messages into a continuous stream.***  For example converting (payload) images into a continous MJPEG stream:
 
 ![Stream encoder](https://raw.githubusercontent.com/bartbutenaers/node-red-contrib-multipart-stream/master/images/stream_encoder.png)
 
 By showing multiple of those MJPEG streams simultaneously in the Node-Red dashboard, we can start building a video surveillance application: see below an example flow to accomplish this kind of behaviour.
 
 ### Comparison with the http-response node
-In lots of use cases **no streaming** is required.  When a question (= http request) arrives at the http-in node, a simple answer (= http response) by the http-response node will be sufficient.  For example somebody asks a single snapshot image (from a camera, stored on disc, ...), and the Node-Red flow will return that image:
+In a lot of other use cases **no streaming** is required.  When a question (= http request) arrives at the http-in node, a simple answer (= http response) by the http-response node will be sufficient.  For example somebody asks a single snapshot image (from a camera, stored on disc, ...), and the Node-Red flow will return that image:
 
 ![Request response](https://raw.githubusercontent.com/bartbutenaers/node-red-contrib-multipart-stream/master/images/request_response.png)
 
@@ -57,37 +57,44 @@ Following steps will be executed, to have a http request result in a (in)finite 
 1. The mjpeg camera stream is returned to the browser, where it will be rendered to the user.
 
 This way the response has become endless (with a *boundary* string as separator between images):
-<global headers> 
-<part headers> 
-<image> 
-<boundary> 
-<part headers> 
-<image> 
-<boundary> 
-<part headers> 
-<image> 
-<boundary> 
-...
-
+```
+   global headers
+   part headers 
+   image
+   boundary
+   part headers
+   image
+   boundary
+   part headers
+   image
+   boundary 
+   ...
+```
 Remark: this is **NOT** mp4 streaming.  In our case each image is compressed (as jpeg), but an mp4 stream also compresses the entire stream (by only sending differences between the images).
 
 #### Stopping a stream
 A stream (i.e. a response to some client) can be stopped in different ways:
-+ The flow can send a message to the encoder node, containg a `msg.stop` with value *true*.
++ The flow can send a message to the encoder node, containg a `msg.stop` with value *true*.  Remark: the payload of this message will not be streamed anymore!
 + The client (e.g. browser) can disconnect from the Node-Red flow.
-
-Once a stream has been ended, a message will be generated on the encoder's output port.  The `msg.res` field in that output message  contains the (closed) response object.
 
 For a finite stream (e.g. playing recorded video footage), it might be useful to send a message with `msg.stop` = true to the encoder node (as soon as all data has been sent).  In that case, the encoder will stop the http response (which is specified in the `msg.res` field).  Otherwise the client keeps waiting for data, while the stream has already ended (since all data has been streamed already).  E.g. in Chrome the tabsheet will have contain a spinning wheel as long as the response is not yet complete:
 
 ![Stream tabsheets](https://raw.githubusercontent.com/bartbutenaers/node-red-contrib-multipart-stream/master/images/stream_tabsheets.png)
 
+#### Stream has stopped
+Once a stream has been ended, you can specify on the config screen (by means of two checkboxes) which of the following messages should be send on the output port:
+
++ *Output message for every closed connection*: A message can be generated for *every* closed stream, with the `msg.res` field containing the (closed) response object. 
++ *Output message when all connections closed*: An empty message can be generated as soon as *all* streams have been closed.
+
 #### Stream to all clients or not
-In the config screen, the encoder *destination* can be specified
+In the config screen, the encoder ***destination*** can be specified
 + All clients
 + Single client (thanks to [Nick O'Leary](https://github.com/knolleary) who provided me the basic idea for this option !)
 
-Watching camera images from our Node-Red flow, is an example of an infinite stream.  **All clients** hook in to the same existing stream, and they receive the same data ***from that moment on***.  Indeed for e.g. a camera stream, you only need to see the images from now on (not the old ones).  Note that other nodes in the flow can pass data (e.g. images) to the encoder node, even when no clients are listening: the data will simply be ignored.
+**ALL CLIENTS**
+
+Watching camera images from our Node-Red flow, is an example of an infinite stream.  All clients hook in to the same existing stream, and ***they all receive the same data from that moment on***.  Indeed for e.g. a camera stream, you only need to see the images from now on (not the old ones).  Note that other nodes in the flow can pass data (e.g. images) to the encoder node, even when no clients are listening: the data will simply be ignored.
 
 ![Stream all](https://raw.githubusercontent.com/bartbutenaers/node-red-contrib-multipart-stream/master/images/stream_all.png)
 ```
@@ -97,7 +104,11 @@ The result - when clients are connecting at different times - looks like this:
 
 ![Stream all result](https://raw.githubusercontent.com/bartbutenaers/node-red-contrib-multipart-stream/master/images/stream_single_result.png)
 
-However in some cases not all clients need to get the same stream: that is what the **single client** option is designed for.  E.g. when camera images have been stored, EACH client wants to see afterwards the ***entire stream from the beginning***.  Now for each http request, some nodes should be triggered to start capturing data (and send that data to the encoder node).  It is important that *all messages should contain the response object* in the `msg.res` field, so the encoder node knows which data needs to be send to which client!
+As soon as a http request arrives (via the http-in node), that message will be passed to the encoder node to register the response object (in the `msg.res` field).  The payload of that message will not be streamed, since it contains information from the http-in node (which would break our stream).  The payload from the next messages will be streamed, and those message are ***not allowed to have a `msg.res` field***!
+
+**SINGLE CLIENT**
+
+However in some cases each client wants to have its own stream: that is what the single client option is designed for.  E.g. when camera images have been stored, ***each client wants to get the entire stream from the beginning***.  Now for each http request, other nodes should be triggered to start capturing data (and send that data to the encoder node).  It is important that ***all messages should contain the response object in the `msg.res` field***, so the encoder node knows which data needs to be send to which client!
 
 ![Stream single](https://raw.githubusercontent.com/bartbutenaers/node-red-contrib-multipart-stream/master/images/stream_single.png)
 
@@ -109,7 +120,12 @@ The result - when clients are connecting at different times - looks like this:
 
 ![Stream single result](https://raw.githubusercontent.com/bartbutenaers/node-red-contrib-multipart-stream/master/images/stream_all_result.png)
 
-Keep in mind that - when having a separate stream for each client - it might be necessary that the flow keeps track of the responses that are being closed.  When client A connects, the flow will start a stream A' for that client.  Some time later another client B connects, so the flow will start a new stream B'.  However when one of these clients disconnects from our flow, it has become useless to keep on sending data to the encoder node (for that specific client): it is just a waste of resources...  This can be solved by reacting to messages on the encoder node's output port: *as soon as a client disconnects, an output message will be generated* (with the response object in the `msg.res` field).
+Keep in mind that - when having a separate stream for each client - it might be necessary that the flow keeps track of the responses that are being closed.  When client A connects, the flow will start a stream A' for that client.  Some time later another client B connects, so the flow will start a new stream B'.  However when one of these clients disconnects from our flow, it has become useless to keep on sending data to the encoder node (for that specific client): it is just a waste of resources...  This can be solved by reacting to messages on the encoder node's output port: *as soon as a client disconnects, an output message will be generated (which can be used as a trigger to stop sending data to the encoder node)*.
+
+### Adaptive streaming
+When we are sending lots of messages to the encoder node (containing lots of data in the payloads), we would run into troubles if the stream cannot handle all that data.  For example if we have a slow network or a slow client system.  In that case the stream buffer would start growing until all memory would be consumed.  At the end our system would stop functioning correctly.
+
+This can be solved by enabling the 'Ignore messages if stream is overloaded' checkbox on the config screen.  When the stream cannot process all messages, the encoder node will start ignoring input messages.  As soon as the stream is again ready to process new data, the encoder node will again start processing input messages.  For example for MJPEG streaming, it is better to send less images than to have a malfunctioning system...
 
 ## Camera images in the dashboard
 Until now we have explained how the flow can produce a continous stream of data.  Now let's explain how these streams can be displayed in the dashboard, to display fluent video.
@@ -137,3 +153,14 @@ When we add multiple of those template nodes (each of them pointing to a differe
 ![Multipart grid](https://raw.githubusercontent.com/bartbutenaers/node-red-contrib-multipart-stream/master/images/multipart_grid.png)
 
 Now it looks like each \<img> element gets it's own browser thread (to render it's video stream), because the browser doesn't freeze anymore.
+
+## Http headers
+At the start of the stream, ***global http headers*** will be send.  Afterwards each part of the multipart stream will contain ***part http headers***, followed by the real data (e.g. an image).
+
+To make sure the client understands that a stream has been setup, both type of headers need some minimal entries:
++ Global headers : the content-type should mention the 'multipart' type, and by disabling all kind of caching we make sure that all data is being handled (instead of using previous data from the cache).
++ Part headers : the content-type should reflect the type of data that we are sending, so the client knows how to render that data (e.g. image/jpeg).  Remark: if a content-length is specified, it will be replaced by the content length calculated by the encoder node.
+
+By default, all required http headers (on both levels) will be available in the config screen.  You can always replace them or add new ones, but make sure you don't remove mandatory headers (or the stream will fail)!!
+
+***None*** of both headers can be specified via the `msg.headers` field! 
