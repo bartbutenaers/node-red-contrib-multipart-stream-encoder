@@ -23,34 +23,49 @@ module.exports = function(RED) {
             node.responses.delete(response);
         }
         
-        // Remove the 'streaming ..' status text when no responses are left to stream to
+        // Remove the 'streaming' status text when no responses are left to stream to
         if (node.responses.size == 0) {
-            node.status({});
+            node.status({fill:"yellow",shape:"ring",text: "streaming (0x)"});
             
-            if (node.outputIfAll == true) {
+            if (node.outputAllClosed == true) {
                 // Create an empty output message, since we have no clue which previous connections have been closed in the past.
-                node.send({payload:""});
+                node.send({payload:node.responses.size});
             }
         }
         
         // Create an output message containing the closed response object (in the msg.res field), if required by the user
-        if (node.outputIfSingle == true) {
-            node.send({res: response});
+        if (node.outputOneClosed == true) {
+            node.send({payload:node.responses.size, res: response});
         }
     }
 
+    // Syntax from RFC 2046 (https://stackoverflow.com/questions/33619914/http-range-request-multipart-byteranges-is-there-a-crlf-at-the-end) :
+    // ...
+    // EOL (considered as part of the boundary): if there are two EOL's, the first one is part of the body (and must be send in output msg)
+    // boundary + optional whitespaces (added by a gateway, which must be deleted)
+    // EOL (end of the boundary)
+    // header1:value1 (optional)
+    // EOL (end of the first part header key/value pair)
+    // ...
+    // headerN:valueN (optional)
+    // EOL (end of the N-the part header key/value pair)
+    // EOL (end of the part headers area, and start of the part body)    
+    // part body
+    // ...
     function MultiPartEncoder(n) {
         RED.nodes.createNode(this,n);
-        this.globalHeaders  = n.globalHeaders || {};
-        this.partHeaders    = n.partHeaders || {};
-        this.statusCode     = n.statusCode || 200;
-        this.destination    = n.destination;
-        this.ignoreMessages = n.ignoreMessages;
-        this.outputIfSingle = n.outputIfSingle;
-        this.outputIfAll    = n.outputIfAll;
-        this.responses      = new Map();
-        this.nodeProgress   = '';
-        this.timestamp      = 0;
+        this.globalHeaders   = n.globalHeaders || {};
+        this.partHeaders     = n.partHeaders || {};
+        this.statusCode      = n.statusCode || 200;
+        this.destination     = n.destination;
+        this.ignoreMessages  = n.ignoreMessages;
+        this.outputOneNew    = n.outputOneNew;
+        this.outputOneClosed = n.outputOneClosed;
+        this.outputAllClosed = n.outputAllClosed;
+        this.responses       = new Map();
+        this.currentStatus   = {};
+        this.timestamp       = 0;
+        this.firstMsg        = true;
         
         var node = this;
         
@@ -108,6 +123,11 @@ module.exports = function(RED) {
                 
                 node.debug('Stream has been started for new request (' + node.responses.size + ' streams active)');
                 
+                // Create an output message containing the closed response object (in the msg.res field), if required by the user
+                if (node.outputOneNew == true) {
+                    node.send({payload:node.responses.size, res: msg.res});
+                }
+                
                 // When the connection is closed afterwards ...
                 // This happens e.g. when the browser page is closed, when the browser page is manually refreshed, ...
                 // We don't handle the 'end' (= closed normally) event, because afterwards the 'close' (= close unexpectly) event seems also to be triggered.
@@ -117,7 +137,7 @@ module.exports = function(RED) {
                     // Find the ServerResponse object that is wrapping 'this' response object
                     for (var [response, active] of node.responses.entries()) {
                         if (response._res == this) {
-                            cleanupResponse(node, this);
+                            cleanupResponse(node, response);
                             node.debug('Stream has been closed by the client (' + node.responses.size + ' streams active');
                             break;
                         }
@@ -135,7 +155,7 @@ module.exports = function(RED) {
                         }
                     }
                 });
-       
+               
                 msg.res._res.status(node.statusCode);
             }
             
@@ -147,6 +167,14 @@ module.exports = function(RED) {
             // response object but relevant payload data.  So we can stream only payload data for messages that don't contain a response object.
             if (node.destination == 'single' || !msg.res) {
                 var relevantResponses = null;
+                
+                if (!relevantResponses || relevantResponses.size === 0) {
+                    // As soon as the firt message arrives, show in the status if no clients are available yet (to stream to)
+                    if (node.firstMsg) {
+                        node.status({fill:"yellow",shape:"ring",text: "streaming (0x)"});
+                        node.firstMsg = false;
+                    }
+                }
                 
                 // Determine which clients (responses) should receive the msg.payload data
                 switch (node.destination) {
@@ -193,30 +221,42 @@ module.exports = function(RED) {
                     
                 // Send data (from the payload) to the stream.  
                 if (relevantResponses.size > 0) {
+                    // Create a string containing all non-body data (boundary, eol's, part headers, ...) to make sure NodeJs
+                    // combines all this data in 1 single chunk.  Otherwise NodeJs creates a chunk for every relevantResponse._res.write
+                    // statement.  We cannot change that behaviour, because the response object is constructed in the Node-Red HttpIn node.
+                    // Indeed, the highWaterMark level cannot be changed afterwards ...
+                    var headersText = "";
+                    
+                    headersText += '\r\n'; // end of the part body                 
+                    headersText += '--myboundary'; 
+                    headersText += '\r\n'; // end of the boundary
+                    
+                    // Set the part headers from the config screen.  We cannot override these with msg.headers because we have no way
+                    // to determine which are global headers or part headers.
+                    for (var partHeaderName in node.partHeaders) {
+                        // Set all the specified part headers, except for the content-lenth (which we will determine ourselves anyway ...
+                        if (partHeaderName.toLowerCase() != "content-length") {
+                            var partHeaderValue = node.partHeaders[partHeaderName];
+                            headersText += partHeaderName + ': ' + partHeaderValue;
+                            headersText += '\r\n'; // end of the header variable (key/value pair)
+                        }                          
+                    }   
+                    
+                    headersText += 'Content-length: ' + msg.payload.length;
+                    headersText += '\r\n'; // end of the content-length header variable (key/value pair)
+                    headersText += '\r\n'; // end of the header section
+                    
                     // Write the msg.payload to all relevant responses/clients
                     for (var [relevantResponse, active] of relevantResponses.entries()) {
                         // When the buffer of the current response is running full (i.e. its 'active' value = false), then don't write data
-                        // to that stream when specified by the user.
+                        // to that stream when specified by the user. 
                         if (active || !node.ignoreMessages) {
                             node.trace('Message payload has been send to stream');
 
-                            relevantResponse._res.write('--myboundary');  
-                            relevantResponse._res.write('\r\n');    
-                            
-                            // Set the part headers from the config screen.  We cannot override these with msg.headers because we have no way
-                            // to determine which are global headers or part headers.
-                            for (var partHeaderName in node.partHeaders) {
-                                // Set all the specified part headers, except for the content-lenth (which we will determine ourselves anyway ...
-                                if (partHeaderName.toLowerCase() != "content-length") {
-                                    var partHeaderValue = node.partHeaders[partHeaderName];
-                                    relevantResponse._res.write(partHeaderName + ': ' + partHeaderValue);
-                                    relevantResponse._res.write('\r\n'); 
-                                }                          
-                            }   
-                            
-                            relevantResponse._res.write('Content-length: ' + msg.payload.length); 
-                            relevantResponse._res.write('\r\n'); 
-                            relevantResponse._res.write('\r\n'); 
+                            // Write all header text with a single 'write' statement, because NodeJs creates a data chunk for every 'write'
+                            // statement.  We cannot change that behaviour here (e.g. by setting other highWaterMark level via the options),
+                            // because Node-Red's HttpIn node creates the response object ...
+                            relevantResponse._res.write(headersText);                           
                             
                             // After writing the entire payload, check whether we can proceed or not.  The write() return false if it has received enough
                             // data to keep it busy for a while (i.e. the stream has exceeded his highWaterMark).  If we should continue sending data to 
@@ -233,11 +273,7 @@ module.exports = function(RED) {
                                     // Dont't add a 'return' statement here, because the next two 'write' statements should be executed anyway.  Otherwise
                                     // the stream would be incomplete, which would cause troubles as soon as the stream is resumed afterwards.
                                 }
-                            }
-
-                            relevantResponse._res.write('\r\n');
-                            relevantResponse._res.write('\r\n');
-                            //relevantResponse._res.flush();
+                            }    
                         }
                         else {
                             node.trace('Message payload has been ignored, since the stream is pauzed');
@@ -248,14 +284,15 @@ module.exports = function(RED) {
                     if (Date.now() - node.timestamp > 500 ) {
                         node.timestamp = Date.now();
                         
-                        // Simulate a progress bar in the status text ...
-                        node.progress += '.';
-                        if (node.progress.length > 5) {
-                            node.progress = '';
+                        // Let the status 'Streaming' flash ...
+                        if (Object.keys(node.currentStatus).length === 0) {
+                            node.currentStatus = {fill:"blue",shape:"dot",text: "streaming (" + relevantResponses.size + "x)"};
+                        }
+                        else {
+                            node.currentStatus = {};
                         }
                     
-                        var displayText = "Streaming " + node.progress;
-                        node.status({fill:"green",shape:"dot",text: displayText});
+                        node.status(node.currentStatus);
                     }
                 }
             }
