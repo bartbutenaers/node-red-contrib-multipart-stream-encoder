@@ -25,7 +25,7 @@ module.exports = function(RED) {
         
         // Remove the 'streaming' status text when no responses are left to stream to
         if (node.responses.size == 0) {
-            node.status({fill:"yellow",shape:"ring",text: "streaming (0x)"});
+            node.status({fill:"grey",shape:"ring",text: "streaming (0x)"});
             
             if (node.outputAllClosed == true) {
                 // Create an empty output message, since we have no clue which previous connections have been closed in the past.
@@ -54,18 +54,21 @@ module.exports = function(RED) {
     // ...
     function MultiPartEncoder(n) {
         RED.nodes.createNode(this,n);
-        this.globalHeaders   = n.globalHeaders || {};
-        this.partHeaders     = n.partHeaders || {};
-        this.statusCode      = n.statusCode || 200;
-        this.destination     = n.destination;
-        this.ignoreMessages  = n.ignoreMessages;
-        this.outputOneNew    = n.outputOneNew;
-        this.outputOneClosed = n.outputOneClosed;
-        this.outputAllClosed = n.outputAllClosed;
-        this.responses       = new Map();
-        this.currentStatus   = {};
-        this.timestamp       = 0;
-        this.firstMsg        = true;
+        this.globalHeaders    = n.globalHeaders || {};
+        this.partHeaders      = n.partHeaders || {};
+        this.statusCode       = n.statusCode || 200;
+        this.destination      = n.destination;
+        this.ignoreMessages   = n.ignoreMessages;
+        this.outputOneNew     = n.outputOneNew;
+        this.outputOneClosed  = n.outputIfSingle;
+        this.outputAllClosed  = n.outputIfAll;        
+        this.highWaterMark    = n.highWaterMark || 16000; // Default 16 kB in NodeJs
+        this.responses        = new Map();
+        this.currentStatus    = {};
+        this.timestamp        = 0;
+        this.firstMsg         = true;
+        this.highWaterCount   = 0;
+        this.msgIgnoredCount  = 0;
         
         var node = this;
         
@@ -117,11 +120,20 @@ module.exports = function(RED) {
                     }
                 }
 
-                // Store the response object in an array, for use later one.
-                // The value (second paramater) specifies whether the stream is active (i.e. if we are allowed to proceed writing data to the stream)
-                node.responses.set(msg.res, true);
+                // Store the response object in an array, for use later one.  The response settings contains two parameters
+                // - First specifies whether the stream is active (i.e. if we are allowed to proceed writing data to the stream).
+                // - Second specifies whether the stream has already been started.
+                var settings = { active:true, started:false };
+                node.responses.set(msg.res, settings);
                 
-                node.debug('Stream has been started for new request (' + node.responses.size + ' streams active)');
+                // Set the specified high water mark.  When that value is reached, NodeJs will let us know (via the return value of the 'write' function),
+                // so we can start ignoring input messages.  Otherwise memory usage will start increasing.  Unless the user has specified that he doesn't
+                // want to skip messages, but that is only acceptable for a small period in time ...
+                // Normally the high water mark needs to be specified as soon as the writable stream is created (via the options), but that is the 
+                // responsibility of Node-Red's HttpIn node.  But seems it also works when we set it afterwards here ...
+                msg.res._res.socket._writableState.highWaterMark = node.highWaterMark;
+                
+                node.trace('Stream has been started for new request (' + node.responses.size + ' streams active)');
                 
                 // Create an output message containing the closed response object (in the msg.res field), if required by the user
                 if (node.outputOneNew == true) {
@@ -135,10 +147,10 @@ module.exports = function(RED) {
                 // Remark: it might be useful in the future to call emitter.setMaxListeners() to increase limit of 11 listeners??
                 msg.res._res.on('close', function() { 
                     // Find the ServerResponse object that is wrapping 'this' response object
-                    for (var [response, active] of node.responses.entries()) {
+                    for (var response of node.responses.keys()) {
                         if (response._res == this) {
                             cleanupResponse(node, response);
-                            node.debug('Stream has been closed by the client (' + node.responses.size + ' streams active');
+                            node.trace('Stream has been closed by the client (' + node.responses.size + ' streams active');
                             break;
                         }
                     }    
@@ -148,10 +160,10 @@ module.exports = function(RED) {
                 // afterwards.  This means that the stream buffer is empty enough to accept new data.  So we can resume writing data to the stream ...
                 msg.res._res.on('drain', function(){
                     // Find the ServerResponse object that is wrapping 'this' response object
-                    for (var [response, active] of node.responses.entries()) {
+                    for (var [response, settings] of node.responses.entries()) {
                         if (response._res == this) {
-                            node.responses.set(response, true);
-                            node.debug('Stream has been resumed (since it can handle extra data again');
+                            settings.active = true;
+                            node.trace('Stream has been resumed (since it can handle extra data again');
                         }
                     }
                 });
@@ -171,7 +183,7 @@ module.exports = function(RED) {
                 if (!relevantResponses || relevantResponses.size === 0) {
                     // As soon as the firt message arrives, show in the status if no clients are available yet (to stream to)
                     if (node.firstMsg) {
-                        node.status({fill:"yellow",shape:"ring",text: "streaming (0x)"});
+                        node.status({fill:"grey",shape:"ring",text: "streaming (0x)"});
                         node.firstMsg = false;
                     }
                 }
@@ -183,8 +195,8 @@ module.exports = function(RED) {
                         // At this point there will always be exactly 1 stream available.
                         relevantResponses = new Map();
                         
-                        var active = node.responses.get(msg.res);
-                        relevantResponses.set(msg.res, active);
+                        var settings = node.responses.get(msg.res);
+                        relevantResponses.set(msg.res, settings);
                         break;
                     case 'all':
                         // For 'all clients' streaming, the data should be sended to all response objects in the array.
@@ -200,12 +212,12 @@ module.exports = function(RED) {
                 // When msg.res = true (in case of a single destination), the specified response will be ended.
                 // The disconnection handler below will make sure that everything is cleaned up ...
                 if (msg.hasOwnProperty('stop') && msg.stop == true) {
-                    for (var [relevantResponse, active] of relevantResponses.entries()) {  
+                    for (var relevantResponse of relevantResponses.keys()) {  
                         relevantResponse._res.end();                              
                         cleanupResponse(node, relevantResponse);   
                     }
                     
-                    node.debug('Stream has been ended by "stop = true" in input message (' + node.responses.size + ' streams active)');
+                    node.trace('Stream has been ended by "stop = true" in input message (' + node.responses.size + ' streams active)');
                     return;
                 }
                 
@@ -226,11 +238,7 @@ module.exports = function(RED) {
                     // statement.  We cannot change that behaviour, because the response object is constructed in the Node-Red HttpIn node.
                     // Indeed, the highWaterMark level cannot be changed afterwards ...
                     var headersText = "";
-                    
-                    headersText += '\r\n'; // end of the part body                 
-                    headersText += '--myboundary'; 
-                    headersText += '\r\n'; // end of the boundary
-                    
+                                        
                     // Set the part headers from the config screen.  We cannot override these with msg.headers because we have no way
                     // to determine which are global headers or part headers.
                     for (var partHeaderName in node.partHeaders) {
@@ -246,12 +254,24 @@ module.exports = function(RED) {
                     headersText += '\r\n'; // end of the content-length header variable (key/value pair)
                     headersText += '\r\n'; // end of the header section
                     
+                    var boundaryText = "";
+                    boundaryText += '\r\n'; // end of the part body                 
+                    boundaryText += '--myboundary'; 
+                    boundaryText += '\r\n'; // end of the boundary
+                    
                     // Write the msg.payload to all relevant responses/clients
-                    for (var [relevantResponse, active] of relevantResponses.entries()) {
+                    for (var [relevantResponse, settings] of relevantResponses.entries()) {
                         // When the buffer of the current response is running full (i.e. its 'active' value = false), then don't write data
                         // to that stream when specified by the user. 
-                        if (active || !node.ignoreMessages) {
-                            node.trace('Message payload has been send to stream');
+                        if (settings.active || !node.ignoreMessages) {
+                            //node.trace('Message payload has been send to stream');
+                            
+                            if (!settings.started) {
+                                // The stream needs to start with a boundary.
+                                relevantResponse._res.write(boundaryText);
+                                
+                                settings.started = true;
+                            }
 
                             // Write all header text with a single 'write' statement, because NodeJs creates a data chunk for every 'write'
                             // statement.  We cannot change that behaviour here (e.g. by setting other highWaterMark level via the options),
@@ -264,29 +284,59 @@ module.exports = function(RED) {
                             // (and it would consuming more and more memory).  Eventually it might even cause our program to run out of address space, and 
                             // crash or get stuck.  Remark: we do this check only when we write the payload, because that will contain the most data ...
                             if (relevantResponse._res.write(msg.payload) == false) {
+                                node.highWaterCount++;
+                                
                                 // It could be that the client has closed the socket, which means the response has already been removed from our map.
                                 // In that case we will certainly avoid that the response is being added here again to the map ...
                                 if (node.responses.has(relevantResponse)) {
                                     // Set 'active' value to 'false' for the current response
-                                    node.responses.set(relevantResponse, false);
-                                    node.debug('Stream has been pauzed (since it is receiving too much data)');
+                                    settings.active = false;
+
                                     // Dont't add a 'return' statement here, because the next two 'write' statements should be executed anyway.  Otherwise
                                     // the stream would be incomplete, which would cause troubles as soon as the stream is resumed afterwards.
                                 }
-                            }    
+                            }  
+
+                            // Close the part body with a boundary text, which signals the end of the current part
+                            relevantResponse._res.write(boundaryText);
                         }
                         else {
-                            node.trace('Message payload has been ignored, since the stream is pauzed');
+                            node.msgIgnoredCount++;
+                            node.trace('Message payload has been ignored, since the stream reached the high water mark');
                         }
                     }
                     
-                    // Update the status text maximum every 500 mseconds
+                    // Update the status text maximum every 500 mseconds (provided that we get at least a message every 500 mseconds)
                     if (Date.now() - node.timestamp > 500 ) {
                         node.timestamp = Date.now();
-                        
+
                         // Let the status 'Streaming' flash ...
                         if (Object.keys(node.currentStatus).length === 0) {
-                            node.currentStatus = {fill:"blue",shape:"dot",text: "streaming (" + relevantResponses.size + "x)"};
+                            // Show the 'streaming' label in another color, when the highWaterCounter has been reached
+                            if (node.highWaterCount > 0) {
+                                if (node.msgIgnoredCount > 0) {
+                                    // Show an yellow dot (as a warning) when messages have been ignored: this means that too many messages are being send 
+                                    // to this node.  Perhaps the client (which receives the response) or connection to the client has a low bandwith.  Or 
+                                    // perhaps the previous node in the flow is just sending too much messages!
+                                    node.currentStatus = {fill:"yellow",shape:"dot",text: "streaming (" + relevantResponses.size + "x)"};
+                                }
+                                else {
+                                    // Show a red dot (as an error) when no messages have been ignored. Since the high watermark has been reached multiple times,
+                                    // we would expect that messages have been ignored.  When this is not the case, most probably the status is continiously
+                                    // switching between active and inactive.  For example when images of 1 Mbyte arrive while the highWaterMark is 16 Kbyte,
+                                    // the highWaterMark is exceeded for every image.  But the image is flushed immediately, which means the drain event will
+                                    // be triggered immediately: so status is again active, which means the next image is processed normally, and the whole
+                                    // process continiously repeats.  This can be solved by user by increasing the highWaterMark (if that is allowed anyway ...).
+                                    node.currentStatus = {fill:"red",shape:"dot",text: "streaming (" + relevantResponses.size + "x)"};
+                                }
+                                
+                                node.highWaterCount = 0;
+                                node.msgIgnoredCount = 0;
+                            }
+                            else {
+                                // Show a blue dot to indicate everything is working fine
+                                node.currentStatus = {fill:"blue",shape:"dot",text: "streaming (" + relevantResponses.size + "x)"};
+                            }
                         }
                         else {
                             node.currentStatus = {};
@@ -301,7 +351,7 @@ module.exports = function(RED) {
         node.on("close", function() { 
             // After a (re)deploy, this node will start again with an empty 'responses' array.  We should end all connections,
             // because otherwise the clients would keep waiting/hanging infinitly for a response.
-            for (var [response, active] of node.responses.entries()) {
+            for (var response of node.responses.keys()) {
                 response._res.end();
             }
             
