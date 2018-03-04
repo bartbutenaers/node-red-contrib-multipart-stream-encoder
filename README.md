@@ -10,14 +10,14 @@ npm install node-red-contrib-multipart-stream-encoder
 ```
 
 ## Usage
-This node works closely together with the http-in node.  The goal is to setup a stream over http, to create a continous sequence of data elements.  These elements can create any kind of data (text, images, ...). 
+This node works closely together with the HttpIn node.  The goal is to setup a stream over http, to create a continous high-speed sequence of data elements.  These elements can create any kind of data (text, images, ...). 
 
-One of the most known examples is an **MJPEG stream**, to send continously JPEG images as a video stream.  
+One of the most known examples is an **MJPEG stream**, to send continously JPEG images as a video stream.  We will use MJPEG streams as an example in the remainder of this page, however other data types are possible.
 
 ### Streaming basics
-In some use cases, data need to be received at high rates.  For example we want to get N camera images per second, to make sure we can display fluent video.  
+Sometimes data need to be received at high rates.  For example get N camera images per second, to be able to display fluent video.  
 
-Such high data rates are not possible by sending a request for every image:
+Such high data rates cannot be reached by sending a request for every image:
 1. Request image 1
 1. Wait for response image 1
 1. Request image 2
@@ -40,14 +40,17 @@ In this case (http) streaming is preferred.  We send a ***single*** (http) reque
    boundary   
    ...
    
-Remark: this has nothing to do with mp4 streaming.  In our case each image is compressed (as jpeg), but an mp4 stream also compresses the entire stream (by only sending differences between the images).
+Remark: this has nothing to do with *mp4 streaming*.  In a MJPEG stream each image is compressed (as jpeg), but an mp4 stream also compresses the entire stream (by only sending differences between the images). 
 
 ### Compare alternatives
 To explain why this encoder node might be handy, let's go through all the available solutions to display video streams in your dashboard:
 
-1. The dashboard can ***get an MJPEG stream directly from an IP camera***, which means the images don't pass through the flow.  This can be implemented easily with a simple flow that only contains a single Template node, which puts an image element on the dashboard (with the camera URL as source):
+1. The dashboard can ***get an MJPEG stream directly from an IP camera***, which means the images don't pass through the Node-Red flow.  This can be implemented easily with a simple flow that only contains a single Template node, which puts an image element on the dashboard (with the camera URL as source):
 
     ![Stream directly flow](https://raw.githubusercontent.com/bartbutenaers/node-red-contrib-multipart-stream/master/images/stream_directly_flow.png)
+    ```
+    [{"id":"4e44e10.85d262","type":"ui_template","z":"47b91ceb.38a754","group":"16a1f12d.07c69f","name":"Display image","order":1,"width":"6","height":"6","format":"<img width=\"16\" height=\"16\" src=\"http://200.36.58.250/mjpg/video.mjpg?resolution=640x480\" />\n","storeOutMessages":true,"fwdInMessages":true,"templateScope":"local","x":920,"y":1360,"wires":[[]]},{"id":"16a1f12d.07c69f","type":"ui_group","z":"","name":"Default","tab":"f136a522.adc2a8","order":1,"disp":true,"width":"6"},{"id":"f136a522.adc2a8","type":"ui_tab","z":"","name":"Home","icon":"home","order":1}]
+    ```
 
     As a result the dashboard html page will contain an image (img) element, which gets its images directly from the IP camera MJPEG stream:
  
@@ -62,7 +65,9 @@ To explain why this encoder node might be handy, let's go through all the availa
 2. The flow could get the images from the camera (using a HttpRequest or MultipartStreamDecoder node), do some image processing and afterwards ***push (via websocket) the manipulated images to the dashboard***:
 
      ![Stream push websocket](https://raw.githubusercontent.com/bartbutenaers/node-red-contrib-multipart-stream/master/images/stream_push_websocket.png)
-     
+    ```
+     [{"id":"db5630e7.83cdc","type":"multipart-decoder","z":"47b91ceb.38a754","name":"","ret":"bin","url":"http://200.36.58.250/mjpg/video.mjpg?resolution=640x480","tls":"","delay":0,"maximum":"10000000","x":590,"y":1240,"wires":[["6535feb.cbf33"]]},{"id":"dfcc9a31.860948","type":"inject","z":"47b91ceb.38a754","name":"Start stream","topic":"","payload":"","payloadType":"date","repeat":"","crontab":"","once":false,"onceDelay":"","x":389.8333435058594,"y":1240.0000381469727,"wires":[["db5630e7.83cdc"]]},{"id":"6535feb.cbf33","type":"base64","z":"47b91ceb.38a754","name":"Encode","x":780,"y":1240,"wires":[["fb64a032.e945b"]]},{"id":"fb64a032.e945b","type":"ui_template","z":"47b91ceb.38a754","group":"16a1f12d.07c69f","name":"Display image","order":1,"width":"6","height":"6","format":"<img width=\"16\" height=\"16\" src=\"data:image/jpg;base64,{{msg.payload}}\" />\n","storeOutMessages":true,"fwdInMessages":true,"templateScope":"local","x":958.2569236755371,"y":1240.4166660308838,"wires":[[]]},{"id":"16a1f12d.07c69f","type":"ui_group","z":"","name":"Default","tab":"f136a522.adc2a8","order":1,"disp":true,"width":"6"},{"id":"f136a522.adc2a8","type":"ui_tab","z":"","name":"Home","icon":"home","order":1}]
+    ```     
       Step 1 : The flow requests an MJPEG stream from the IP camera.  
       Step 2 : The IP camera responds by sending an endless stream of images (i.e. an MJPEG stream).  
       Step 3 : The flow will do some image processing and send the message (image in `msg.payload`) to the template node.  
