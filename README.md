@@ -10,9 +10,22 @@ npm install node-red-contrib-multipart-stream-encoder
 ```
 
 ## Usage
-This node works closely together with the HttpIn node.  The goal is to setup a stream over http, to create a continous high-speed sequence of data elements.  These elements can create any kind of data (text, images, ...). 
+The goal is to setup a stream over http, to create a continous sequence of data (text, images, ...).  One of the most known examples is an **MJPEG stream**, to send continously JPEG images (like a video stream).  
 
-One of the most known examples is an **MJPEG stream**, to send continously JPEG images as a video stream.  We will use MJPEG streams as an example in the remainder of this page, however other data types are possible.
+***The encoder converts (payloads from) separate messages into a continuous stream.***  For example to convert images into a continous MJPEG stream:
+
+![Stream encoder](https://raw.githubusercontent.com/bartbutenaers/node-red-contrib-multipart-stream/master/images/stream_encoder.png)
+
+This node will work closely together with the HttpIn node, as can be seen in the next flow:
+
+![Basic flow](https://raw.githubusercontent.com/bartbutenaers/node-red-contrib-multipart-stream/master/images/stream_basic_flow.png)
+```
+[{"id":"561b7ff7.7caf3","type":"http in","z":"15244fe6.9ae87","name":"","url":"/xxxx","method":"get","upload":false,"swaggerDoc":"","x":1120,"y":260,"wires":[["cc1feca1.b909b"]]},{"id":"cc1feca1.b909b","type":"multipart-encoder","z":"15244fe6.9ae87","name":"","statusCode":"","ignoreMessages":true,"outputIfSingle":true,"outputIfAll":false,"globalHeaders":{"Content-Type":"multipart/x-mixed-replace;boundary=--myboundary","Connection":"keep-alive","Expires":"Fri, 01 Jan 1990 00:00:00 GMT","Cache-Control":"no-cache, no-store, max-age=0, must-revalidate","Pragma":"no-cache"},"partHeaders":{"Content-Type":"image/jpeg"},"destination":"all","x":1300,"y":200,"wires":[[]]},{"id":"bd955688.623878","type":"http request","z":"15244fe6.9ae87","name":"HttpRequest to get image","method":"GET","ret":"bin","url":"","tls":"","x":1070,"y":200,"wires":[["cc1feca1.b909b"]]},{"id":"da39d7.4e70f628","type":"function","z":"15244fe6.9ae87","name":"Next image url","func":"var counter = global.get(\"image_counter\") || 0; \ncounter++;\nglobal.set(\"image_counter\",counter);\n\nmsg.url = 'https://dummyimage.com/400x200/fff/000&text=PNG+' + counter;\n\nreturn msg;","outputs":1,"noerr":0,"x":845,"y":200,"wires":[["bd955688.623878"]]},{"id":"435929ff.b35c18","type":"inject","z":"15244fe6.9ae87","name":"Every second","topic":"","payload":"","payloadType":"date","repeat":"1","crontab":"","once":false,"x":637.9999885559082,"y":199.99999904632568,"wires":[["da39d7.4e70f628"]]}]
+```
+
+The flow captures images (e.g. from an IP camera, from disc, ...) and encodes those images into a live stream.  When you navigate with your browser to the URL specified in the HttpIn node, the HttpIn node will pass this request to the encoder node.  As a result, the encoder node will send the video stream to your browser.  For this test Chrome is being used, because some other browsers require the stream to be called from an <img> or <video> tag.
+
+We will use MJPEG streams as an example in the remainder of this page, however other data types are possible.
 
 ### Streaming basics
 Sometimes data need to be received at high rates.  For example get N camera images per second, to be able to display fluent video.  
@@ -28,17 +41,17 @@ Indeed this would result in too much overhead: we would have to wait all the tim
 
 In this case (http) streaming is preferred.  We send a ***single*** (http) request, and the response will be an (in)finite stream of images.  A *boundary* string will be used as a separator between the images:
 
-   global headers  
-   part headers  
-   *image*  
-   boundary  
-   part headers  
-   *image*  
-   boundary  
-   part headers  
-   *image*  
-   boundary   
-   ...
+    global headers  
+    part headers  
+    IMAGE  
+    boundary  
+    part headers  
+    IMAGE  
+    boundary  
+    part headers  
+    IMAGE  
+    boundary   
+    ...
    
 Remark: this has nothing to do with *mp4 streaming*.  In a MJPEG stream each image is compressed (as jpeg), but an mp4 stream also compresses the entire stream (by only sending differences between the images). 
 
