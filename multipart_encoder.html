@@ -27,7 +27,13 @@
         <label>&nbsp;</label>
         <input type="checkbox" id="node-input-ignoreMessages" style="display: inline-block; width: auto; vertical-align: top;">
         <label for="node-input-ignoreMessages" style="width:70%;"> Ignore messages if stream is overloaded</label>
-    </div>       
+    </div> 
+    </div>
+        <div class="form-row">
+        <label>&nbsp;</label>
+        <input type="checkbox" id="node-input-outputOneNew" style="display: inline-block; width: auto; vertical-align: top;">
+        <label for="node-input-outputOneNew" style="width:70%;"> Output message for every new connection</label>
+    </div>        
     <div class="form-row">
         <label>&nbsp;</label>
         <input type="checkbox" id="node-input-outputIfSingle" style="display: inline-block; width: auto; vertical-align: top;">
@@ -51,6 +57,10 @@
     <div class="form-row node-input-part-headers-container-row">
         <ol id="node-input-part-headers-container"></ol>
     </div>
+    <div class="form-row">
+        <label for="node-input-highWaterMark"><i class="fa fa-level-down"></i> Mem. limit</label>
+        <input type="number" id="node-input-highWaterMark">
+    </div>   
     </br>
     <div class="form-row">
         <label for="node-input-name"><i class="icon-tag"></i> Name</label>
@@ -60,7 +70,6 @@
 
 <script type="text/x-red" data-help-name="multipart-encoder">
     <p>Sends an infinite response stream back to requests received from an HTTP Input node.</p>
-
     <h3>Inputs</h3>
     <dl class="message-properties">
         <dt>payload <span class="property-type">string</span></dt>
@@ -84,8 +93,10 @@
     <p>The <code>part headers</code> will be send in every part of the stream, and give information about the part content (e.g. type image).</p>
     <p>The <code>Ignore headers in input message</code> allows to ignore the <b>msg.headers</b> field, in case these headers are not relevant.</p>
     <p>The <code>Ignore messages if stream is overloaded</code> allows to ignore the input messages, when the stream buffer is consuming too much memory.</p>
+    <p>The <code>Output message for every new connection</code> allows to create an output messages, which have a <code>msg.res</code> field containing the closed response object. And the <code>msg.payload</code> field containing the current new number of connections.</p>
     <p>The <code>Output message for every closed connection</code> allows to create an output messages, which have a <code>msg.res</code> field containing the closed response object.</p>
-    <p>The <code>Output message when all connections closed</code> allows to create an output message, which contains <b>no</b> link to the closed response objects.</p>     
+    <p>The <code>Output message when all connections closed</code> allows to create an output message, which contains <b>no</b> link to the closed response objects.</p>  
+    <p>The <code>Memory limit</code> specifies the maximum size (of bytes) that can be used for buffering images.    
     <p>The <code>destination</code> specifies how the payloads in the messages are streamed to the responses:
     <ul>
       <li><b>Single client</b>: A payload is streamed only for the request that is specified in the same input message.  
@@ -110,6 +121,7 @@
             name: {value:""},
             statusCode: {value:"",validate: RED.validators.number(true)},
             ignoreMessages: {value:true},
+            outputOneNew: {value:false},
             outputIfSingle: {value:false},
             outputIfAll: {value:false},
             // Add some default global http headers, which are required for multipart streaming
@@ -119,7 +131,8 @@
                                    "Cache-Control":"no-cache, no-store, max-age=0, must-revalidate",
                                    "Pragma":"no-cache"}},         
             partHeaders: {value:{"Content-Type":"image/jpeg"}},                                   
-            destination: {value:"all"}
+            destination: {value:"all"},
+            highWaterMark: {value: 16384} // Default 16 kB in NodeJs
         },
         inputs:1,
         outputs:1,
@@ -132,10 +145,15 @@
             return this.name?"node_label_italic":"";
         },
         oneditprepare: function() {
-            function resizeRule(rule) {
+            // Make sure that existing (pre-deployed) nodes also get their default value, when the config screen is displayed
+            if (!this.highWaterMark){
+                this.highWaterMark = 16384;
+                $("#node-input-highWaterMark").val(16384);
+            }
+    
+             function resizeRule(rule) {
                 var newWidth = rule.width();
                 rule.find('.red-ui-typedInput').typedInput("width",(newWidth-30)/2);
-
             }
             var globalHeaderList = $("#node-input-global-headers-container").css('min-height','150px').css('min-width','450px').editableList({
                 addItem: function(container,i,header) {
@@ -151,17 +169,14 @@
                     var propertyValue = $('<input/>',{class:"node-input-header-value",type:"text",style:"margin-left: 10px"})
                         .appendTo(row)
                         .typedInput({default:'str',types:['str']});
-
                     // Display the specified header name and value (from the node) in the respective text fields
                     propertyName.typedInput('value',header.name);
                     propertyValue.typedInput('value',header.value);
-
                     resizeRule(container);
                 },
                 resizeItem: resizeRule,
                 removable: true
             });
-
             // Show all the global headers from the node in the html table
             if (this.globalHeaders) {
                 for (var headerName in this.globalHeaders) {
@@ -186,17 +201,14 @@
                     var propertyValue = $('<input/>',{class:"node-input-header-value",type:"text",style:"margin-left: 10px"})
                         .appendTo(row)
                         .typedInput({default:'str',types:['str']});
-
                     // Display the specified header name and value (from the node) in the respective text fields
                     propertyName.typedInput('value',header.name);
                     propertyValue.typedInput('value',header.value);
-
                     resizeRule(container);
                 },
                 resizeItem: resizeRule,
                 removable: true
             });
-
             // Show all the part headers from the node in the html table
             if (this.partHeaders) {
                 for (var headerName in this.partHeaders) {
