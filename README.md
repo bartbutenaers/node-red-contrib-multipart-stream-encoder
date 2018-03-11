@@ -23,7 +23,7 @@ This node will work closely together with the HttpIn node, as can be seen in the
 [{"id":"561b7ff7.7caf3","type":"http in","z":"15244fe6.9ae87","name":"","url":"/xxxx","method":"get","upload":false,"swaggerDoc":"","x":1120,"y":260,"wires":[["cc1feca1.b909b"]]},{"id":"cc1feca1.b909b","type":"multipart-encoder","z":"15244fe6.9ae87","name":"","statusCode":"","ignoreMessages":true,"outputIfSingle":true,"outputIfAll":false,"globalHeaders":{"Content-Type":"multipart/x-mixed-replace;boundary=--myboundary","Connection":"keep-alive","Expires":"Fri, 01 Jan 1990 00:00:00 GMT","Cache-Control":"no-cache, no-store, max-age=0, must-revalidate","Pragma":"no-cache"},"partHeaders":{"Content-Type":"image/jpeg"},"destination":"all","x":1300,"y":200,"wires":[[]]},{"id":"bd955688.623878","type":"http request","z":"15244fe6.9ae87","name":"HttpRequest to get image","method":"GET","ret":"bin","url":"","tls":"","x":1070,"y":200,"wires":[["cc1feca1.b909b"]]},{"id":"da39d7.4e70f628","type":"function","z":"15244fe6.9ae87","name":"Next image url","func":"var counter = global.get(\"image_counter\") || 0; \ncounter++;\nglobal.set(\"image_counter\",counter);\n\nmsg.url = 'https://dummyimage.com/400x200/fff/000&text=PNG+' + counter;\n\nreturn msg;","outputs":1,"noerr":0,"x":845,"y":200,"wires":[["bd955688.623878"]]},{"id":"435929ff.b35c18","type":"inject","z":"15244fe6.9ae87","name":"Every second","topic":"","payload":"","payloadType":"date","repeat":"1","crontab":"","once":false,"x":637.9999885559082,"y":199.99999904632568,"wires":[["da39d7.4e70f628"]]}]
 ```
 
-The flow captures images (e.g. from an IP camera, from disc, ...) and encodes those images into a live stream.  When you navigate with your browser to the URL specified in the HttpIn node, the HttpIn node will pass this request to the encoder node.  As a result, the encoder node will send the video stream to your browser.  For this test Chrome is being used, because some other browsers require the stream to be called from an <img> or <video> tag.
+The flow captures images (e.g. from an IP camera, from disc, ...) and encodes those images into a live stream.  When you navigate with your browser to the URL specified in the HttpIn node, the HttpIn node will pass this request to the encoder node.  As a result, the encoder node will send the video stream to your browser.  Multiple browser windows can be opened, to watch the same stream simultaneously.  For this test Chrome is being used, because some other browsers require the stream to be called from an \<img\> or \<video\> tag.
 
 We will use MJPEG streams as an example in the remainder of this page, however other data types are possible.
 
@@ -31,27 +31,26 @@ We will use MJPEG streams as an example in the remainder of this page, however o
 Sometimes data need to be received at high rates.  For example get N camera images per second, to be able to display fluent video.  
 
 Such high data rates cannot be reached by sending a request for every image:
-1. Request image 1
-1. Wait for response image 1
-1. Request image 2
-1. Wait for response image 2
-1. ...
+    1. Request image 1
+    1. Wait for response image 1
+    1. Request image 2
+    1. Wait for response image 2
+    1. ...
 
 Indeed this would result in too much overhead: we would have to wait all the time, some devices cannot handle the overflow of http requests, ...
 
 In this case (http) streaming is preferred.  We send a ***single*** (http) request, and the response will be an (in)finite stream of images.  A *boundary* string will be used as a separator between the images:
-
-    global headers  
-    part headers  
-    IMAGE  
-    boundary  
-    part headers  
-    IMAGE  
-    boundary  
-    part headers  
-    IMAGE  
-    boundary   
-    ...
+- global headers  
+- part headers  
+- IMAGE  
+- boundary  
+- part headers  
+- IMAGE  
+- boundary  
+- part headers  
+- IMAGE  
+- boundary   
+- ...
    
 Remark: this has nothing to do with *mp4 streaming*.  In a MJPEG stream each image is compressed (as jpeg), but an mp4 stream also compresses the entire stream (by only sending differences between the images). 
 
@@ -111,35 +110,36 @@ To explain why this encoder node might be handy, let's go through all the availa
 
    Remark: The [node-red-contrib-multipart-stream-decoder](https://www.npmjs.com/package/node-red-contrib-multipart-stream-decoder) is used to decode the MJPEG stream from the IP camera, and convert it to separate images.  
 
-***The encoder converts (payloads from) separate messages into a continuous stream.***  For example converting (payload) images into a continous MJPEG stream:
-
-![Stream encoder](https://raw.githubusercontent.com/bartbutenaers/node-red-contrib-multipart-stream/master/images/stream_encoder.png)
-
-In the remainder of this page, we will discuss only the last solution ...
-
-### Request/Response objects (Advanced)
-The communication between the HttpIn node and the encoder node in more detail:
-1. The ExpressJs will create two related objects for each http request: a Request object and a Response object.  
-1. The HttpIn node will create an output message (request in `msg.payload` and responsein `msg.res`).  
-1. The encoder node stores the response object for using it later on.  
-1. The encoder node will send images (that arrive on its input) to those response objects.  
-
-This way a single request will result in an endless response, i.e. a multipart stream ...
+In the remainder of this page, we will discuss only option 3 ...
 
 #### Controlling a stream
 The streams can be controlled in multiple ways:
 
 + ***Starting*** a stream is accomplished by the HttpIn node: as soon as this node sends a request message to the encoder, a stream will be started.
 + ***Pausing*** a stream is accomplished simply by not sending data to the encoder node.  But keep in mind that the requesting client might have specified a timeout, so the client might interrupt the connection afterwards.
-+ ***Stopping*** a stream is accomplished by sending a control message to the encoder node, containg a `msg.stop` with value *true*.  Such a control message will not be streamed to the client.  Otherwise a stream can also be stopped by the requesting client, by disconnecting from the Node-Red flow (e.g. a dashboard that is being closed by the user).
++ ***Stopping*** a stream is accomplished by sending a control message to the encoder node, containg a `msg.stop` with value *true*.  Such a control message will not be streamed to the client.  Otherwise a stream can also be stopped by the requesting client, by disconnecting from the Node-Red flow (e.g. a dashboard that is being closed by the user).  The stream can also be stopped by the client (by disconnecting) or by (re)deploying the flow.
+
+The following flow offers buttons to pause/resume/stop a stream:
+
+![Control stream](https://raw.githubusercontent.com/bartbutenaers/node-red-contrib-multipart-stream/master/images/stream_control.png)
+```
+[{"id":"561b7ff7.7caf3","type":"http in","z":"15244fe6.9ae87","name":"","url":"/xxxx","method":"get","upload":false,"swaggerDoc":"","x":1660,"y":240,"wires":[["cc1feca1.b909b"]]},{"id":"cc1feca1.b909b","type":"multipart-encoder","z":"15244fe6.9ae87","name":"","statusCode":"","ignoreMessages":true,"outputIfSingle":true,"outputIfAll":false,"globalHeaders":{"Content-Type":"multipart/x-mixed-replace;boundary=--myboundary","Connection":"keep-alive","Expires":"Fri, 01 Jan 1990 00:00:00 GMT","Cache-Control":"no-cache, no-store, max-age=0, must-revalidate","Pragma":"no-cache"},"partHeaders":{"Content-Type":"image/jpeg"},"destination":"all","x":1840,"y":300,"wires":[[]]},{"id":"bd955688.623878","type":"http request","z":"15244fe6.9ae87","name":"HttpRequest to get image","method":"GET","ret":"bin","url":"","tls":"","x":1610,"y":300,"wires":[["cc1feca1.b909b"]]},{"id":"da39d7.4e70f628","type":"function","z":"15244fe6.9ae87","name":"Next image url","func":"var counter = global.get(\"image_counter\") || 0; \ncounter++;\nglobal.set(\"image_counter\",counter);\n\nmsg.url = 'https://dummyimage.com/400x200/fff/000&text=PNG+' + counter;\n\nreturn msg;","outputs":1,"noerr":0,"x":1380,"y":300,"wires":[["bd955688.623878"]]},{"id":"435929ff.b35c18","type":"inject","z":"15244fe6.9ae87","name":"Every second","topic":"","payload":"","payloadType":"date","repeat":"1","crontab":"","once":false,"x":1037.9999885559082,"y":299.9999990463257,"wires":[["58d2c398.976efc"]]},{"id":"5a5de18d.2ef8a","type":"inject","z":"15244fe6.9ae87","name":"Stop stream","topic":"","payload":"","payloadType":"date","repeat":"","crontab":"","once":false,"onceDelay":"","x":1450,"y":360,"wires":[["bca25c2b.4079f"]]},{"id":"bca25c2b.4079f","type":"change","z":"15244fe6.9ae87","name":"","rules":[{"t":"set","p":"stop","pt":"msg","to":"true","tot":"bool"}],"action":"","property":"","from":"","to":"","reg":false,"x":1650,"y":360,"wires":[["cc1feca1.b909b"]]},{"id":"a39192ce.80e4b","type":"inject","z":"15244fe6.9ae87","name":"Pause stream","topic":"","payload":"true","payloadType":"bool","repeat":"","crontab":"","once":false,"onceDelay":"","x":1450,"y":400,"wires":[["d1bced7a.5790c"]]},{"id":"d84c646e.088fd8","type":"inject","z":"15244fe6.9ae87","name":"Resume stream","topic":"","payload":"false","payloadType":"bool","repeat":"","crontab":"","once":true,"onceDelay":"","x":1460,"y":440,"wires":[["d1bced7a.5790c"]]},{"id":"58d2c398.976efc","type":"switch","z":"15244fe6.9ae87","name":"","property":"streamPaused","propertyType":"flow","rules":[{"t":"false"}],"checkall":"true","repair":false,"outputs":1,"x":1210,"y":300,"wires":[["da39d7.4e70f628"]]},{"id":"d1bced7a.5790c","type":"change","z":"15244fe6.9ae87","name":"","rules":[{"t":"set","p":"streamPaused","pt":"flow","to":"payload","tot":"msg"}],"action":"","property":"","from":"","to":"","reg":false,"x":1680,"y":400,"wires":[[]]}]
+```
 
 ### Keeping track of active requests
 When no requests are currently active, this means that no clients are requesting data (i.e. no active client sessions).  In that case it is *adviced to stop sending data to the encoder*, to avoid performance loss.  However it is not easy to keep track of active requests from within a Node-Red flow: the HttpIn node sends a message for every new request, but under the hood ExpressJs will close the requests without you knowing it.
 
 To solve this, the encoder node can generate following output message types (if specified in the node's config screen):
-+ *Output message for every new connection* : when a new request is registered, a message is generated with `msg.res` containing the related response object.  The `msg.payload` field contains the new number of current connections.
-+ *Output message for every closed connection* : when a request is closed, a message is generated with `msg.res` containing the related response object.  The `msg.payload` field contains the new number of current connections.
-+ *Output message when all connections closed* : when all requests are closed, a message is created to indicate that.
++ *Output message for every new connection* : when a new request is registered, a message is generated with `msg.res` containing the related response object.  The `msg.topic` will be *'new_connection'*.
++ *Output message for every closed connection* : when a request is closed, a message is generated with `msg.res` containing the related response object.  The `msg.topic` will be *'closed_connection'*.
++ *Output message when all connections closed* : when all requests are closed, a message is created to indicate that.  The `msg.topic` will be *'no_connection'*.
+
+In all these output messages, the `msg.payload` field contains the number of current connections.  This client counter can be used e.g. to pause the image processing automatically when no clients are listening, and resume the stream when clients become online:
+
+![Throttling](https://raw.githubusercontent.com/bartbutenaers/node-red-contrib-multipart-stream/master/images/stream_throttling.png)
+```
+[{"id":"7f2b6b5c.691b64","type":"http in","z":"15244fe6.9ae87","name":"","url":"/infinite","method":"get","upload":false,"swaggerDoc":"","x":816,"y":41.000000953674316,"wires":[["5b3e4039.df33b"]]},{"id":"5b3e4039.df33b","type":"multipart-encoder","z":"15244fe6.9ae87","name":"","statusCode":"","ignoreMessages":true,"outputOneNew":true,"outputIfSingle":true,"outputIfAll":true,"globalHeaders":{"Content-Type":"multipart/x-mixed-replace;boundary=--myboundary","Connection":"keep-alive","Expires":"Fri, 01 Jan 1990 00:00:00 GMT","Cache-Control":"no-cache, no-store, max-age=0, must-revalidate","Pragma":"no-cache"},"partHeaders":{"Content-Type":"image/jpeg"},"destination":"all","highWaterMark":16384,"x":1012.0000305175781,"y":41.00000190734863,"wires":[["110f23b9.aa0fbc"]]},{"id":"fb72a642.df0eb8","type":"http request","z":"15244fe6.9ae87","name":"Get image by url","method":"GET","ret":"bin","url":"","tls":"","x":828.0000114440918,"y":101.00000190734863,"wires":[["5b3e4039.df33b"]]},{"id":"59a9f54a.322d2c","type":"function","z":"15244fe6.9ae87","name":"Next image url","func":"var counter = global.get(\"image_counter\") || 0; \ncounter++;\nglobal.set(\"image_counter\",counter);\n\nmsg.url = 'https://dummyimage.com/400x200/fff/000&text=PNG+' + counter;\n\nreturn msg;","outputs":1,"noerr":0,"x":633.0000114440918,"y":101.00000190734863,"wires":[["fb72a642.df0eb8"]]},{"id":"82554055.ab38d","type":"inject","z":"15244fe6.9ae87","name":"Every second","topic":"","payload":"","payloadType":"date","repeat":"1","crontab":"","once":false,"x":196.52344131469727,"y":100.4062557220459,"wires":[[]]},{"id":"dc848d6.599127","type":"switch","z":"15244fe6.9ae87","name":"if flow.clientCount > 0","property":"clientCount","propertyType":"flow","rules":[{"t":"gt","v":"0","vt":"num"}],"checkall":"true","repair":false,"outputs":1,"x":411.5117492675781,"y":100.8398494720459,"wires":[["59a9f54a.322d2c"]]},{"id":"110f23b9.aa0fbc","type":"change","z":"15244fe6.9ae87","name":"Set flow.clientCount","rules":[{"t":"set","p":"clientCount","pt":"flow","to":"payload","tot":"msg"}],"action":"","property":"","from":"","to":"","reg":false,"x":1210,"y":40,"wires":[[]]}]
+```
 
 ## Stream to all clients or not
 Based on the [feedback](https://groups.google.com/d/msg/node-red/NhzX6tN9xyI/5KieYZxwBAAJ) of Nick O’Leary, this encoder allows to stream the data to all clients or to a single client.
@@ -198,3 +198,12 @@ To make sure the client understands that a multipart stream has been setup, both
 By default, all required http headers (on both levels) will be available in the config screen.  You can always replace them or add new ones, but make sure you don't remove mandatory headers (or the stream will fail)!!
 
 ***None*** of both headers can be specified via the `msg.headers` field! 
+
+### Request/Response objects (Advanced)
+The communication between the HttpIn node and the encoder node in more detail:
+1. The ExpressJs will create two related objects for each http request: a Request object and a Response object.  
+1. The HttpIn node will create an output message (request in `msg.payload` and responsein `msg.res`).  
+1. The encoder node stores the response object for using it later on.  
+1. The encoder node will send images (that arrive on its input) to those response objects.  
+
+This way a single request will result in an endless response, i.e. a multipart stream ...
