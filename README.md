@@ -128,6 +128,17 @@ This option can be disabled if there is a short burst of images, and all of thos
 
 By default the *stream buffer size* is 16 Kbyte in NodeJs, and is called the *high water mark*.  This default ***memory limit*** can be changed in the encoder's config screen.  E.g. when working with images, the 16 Kbyte would be exceeded all the time (since a single image will already exceed 16 Kbyte).
 
+### Node status
+The node status displays the number of active client connections:
+
+![Stream tabsheets](https://raw.githubusercontent.com/bartbutenaers/node-red-contrib-multipart-stream/master/images/stream_status_count.png)
+
+The status text can have different colors:
++ *grey*: There are currently no active clients, so no data will be streamed.
++ *blue*: Everything is fine, i.e. the data is currently being streamed to N active clients.
++ *yellow*: Data is being streamed, but some input messages have been ignored.  This warning indicates that either the flow is sending too much messages, or the client connection is too slow to handle all the data.
++ *red*: Data is being streamed, but the stream buffer has overflowed multiple times while no messages have been ignored.  This means that a single image is too big to fit into the stream buffer.  As a result the NodeJs stream is continiously being toggled between paused and resumed.  This can be solved by increasing the memory limit on the node's config screen.
+
 ## Streaming basics
 Sometimes data need to be received at high rates.  For example get N camera images per second, to be able to display fluent video.  
 
