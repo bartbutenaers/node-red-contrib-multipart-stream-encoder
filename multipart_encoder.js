@@ -29,13 +29,13 @@ module.exports = function(RED) {
             
             if (node.outputAllClosed == true) {
                 // Create an empty output message, since we have no clue which previous connections have been closed in the past.
-                node.send({payload:node.responses.size});
+                node.send({payload:node.responses.size, topic:'no_connection'});
             }
         }
         
         // Create an output message containing the closed response object (in the msg.res field), if required by the user
         if (node.outputOneClosed == true) {
-            node.send({payload:node.responses.size, res: response});
+            node.send({payload:node.responses.size, res: response, topic:'closed_connection'});
         }
     }
 
@@ -87,7 +87,12 @@ module.exports = function(RED) {
                         return;
                     }
                     break;
-            }       
+            } 
+
+            if (msg.res && !msg.res._res.connection.writable) {
+                node.warn("The message refers to a response (msg.res) that has already been closed"); 
+                return;
+            }
                     
             // ----------------------------------------------------------------------------------------------------------------------
             // SETUP NEW STREAM TO EVERY NEW RESPONSE OBJECT
@@ -137,7 +142,7 @@ module.exports = function(RED) {
                 
                 // Create an output message containing the closed response object (in the msg.res field), if required by the user
                 if (node.outputOneNew == true) {
-                    node.send({payload:node.responses.size, res: msg.res});
+                    node.send({payload:node.responses.size, res: msg.res, topic:'new_connection'});
                 }
                 
                 // When the connection is closed afterwards ...
@@ -318,7 +323,7 @@ module.exports = function(RED) {
                                     // Show an yellow dot (as a warning) when messages have been ignored: this means that too many messages are being send 
                                     // to this node.  Perhaps the client (which receives the response) or connection to the client has a low bandwith.  Or 
                                     // perhaps the previous node in the flow is just sending too much messages!
-                                    node.currentStatus = {fill:"yellow",shape:"dot",text: "streaming (" + relevantResponses.size + "x)"};
+                                    node.currentStatus = {fill:"yellow",shape:"dot",text: "streaming (" + node.responses.size + "x)"};
                                 }
                                 else {
                                     // Show a red dot (as an error) when no messages have been ignored. Since the high watermark has been reached multiple times,
@@ -327,7 +332,7 @@ module.exports = function(RED) {
                                     // the highWaterMark is exceeded for every image.  But the image is flushed immediately, which means the drain event will
                                     // be triggered immediately: so status is again active, which means the next image is processed normally, and the whole
                                     // process continiously repeats.  This can be solved by user by increasing the highWaterMark (if that is allowed anyway ...).
-                                    node.currentStatus = {fill:"red",shape:"dot",text: "streaming (" + relevantResponses.size + "x)"};
+                                    node.currentStatus = {fill:"red",shape:"dot",text: "streaming (" + node.responses.size + "x)"};
                                 }
                                 
                                 node.highWaterCount = 0;
@@ -335,7 +340,7 @@ module.exports = function(RED) {
                             }
                             else {
                                 // Show a blue dot to indicate everything is working fine
-                                node.currentStatus = {fill:"blue",shape:"dot",text: "streaming (" + relevantResponses.size + "x)"};
+                                node.currentStatus = {fill:"blue",shape:"dot",text: "streaming (" + node.responses.size + "x)"};
                             }
                         }
                         else {
