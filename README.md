@@ -12,7 +12,7 @@ npm install node-red-contrib-multipart-stream-encoder
 ## Usage
 The goal is to setup a stream over http, to create a continous sequence of data (text, images, ...).  One of the most known examples is an **MJPEG stream**, to send continously JPEG images (like a video stream).  
 
-***The encoder converts (payloads from) separate messages into a continuous stream.***  For example to convert images into a continous MJPEG stream:
+***The encoder converts (payloads from) separate messages into a continuous stream.***  For example to convert images into a continous MJPEG stream, so your ***Node-Red flow behaves like an IP camera that can offer live video***:
 
 ![Stream encoder](https://raw.githubusercontent.com/bartbutenaers/node-red-contrib-multipart-stream/master/images/stream_encoder.png)
 
@@ -25,16 +25,20 @@ This node will work closely together with the HttpIn node, as can be seen in the
 
 The above flow captures images (e.g. from an IP camera, from disc, ...) and encodes those images into a live stream.  When a browser is used to navigate to the URL specified in the HttpIn node, the HttpIn node will pass this request to the encoder node.  As a result, the encoder node will send the video stream to your browser.  Multiple browser windows can be opened simultaneously, to display the same stream multiple times.  For this simple test Chrome is being used, because some other browsers require the stream to be called from within an \<img\> or \<video\> tag (which means it cannot simply display the stream, when a stream URL is entered).
 
-We will use MJPEG streams in the remainder of this page, however it is also possible to stream other data types.  
+We will use MJPEG streams in the remainder of this page, however it is also possible to stream other data types.
 
-#### Controlling a stream
+### Controlling a stream  
 
 The streams can be controlled in multiple ways:
 
 + ***Starting*** a stream is initiated by a client, via the HttpIn node.  As soon as the HttpIn node sends a request message to the encoder, a stream will be started.
 + ***Pausing*** a stream is accomplished simply by not sending data to the encoder node.  But keep in mind that the requesting client might have specified a timeout, so the client might interrupt the connection when the stream is being paused too long.
 + ***Stopping*** a stream can be accomplished in multiple ways:
-    - By sending a control message to the encoder node, containing a `msg.stop` with value *true*.  Such a control message will not be streamed to the client.  
+    - By sending a control message to the encoder node, containing a `msg.stop` with value *true*.  This way the active client knows that no data will be streamed anymore, to avoid that the client will keep waiting.  E.g. in Chrome the tabsheets would contain a spinning wheel as long as the response is not yet complete:
+
+      ![Stream tabsheets](https://raw.githubusercontent.com/bartbutenaers/node-red-contrib-multipart-stream/master/images/stream_tabsheets.png)
+    
+      Such a control message will not be streamed to the client.  
     - By the client which disconnects from the stream (e.g. a dashboard that is being closed by the user).
     - By the Node-Red flow that is being (re)deployed.
 
@@ -44,8 +48,8 @@ The following flow offers buttons to pause/resume/stop a stream:
 ```
 [{"id":"561b7ff7.7caf3","type":"http in","z":"15244fe6.9ae87","name":"","url":"/xxxx","method":"get","upload":false,"swaggerDoc":"","x":1660,"y":240,"wires":[["cc1feca1.b909b"]]},{"id":"cc1feca1.b909b","type":"multipart-encoder","z":"15244fe6.9ae87","name":"","statusCode":"","ignoreMessages":true,"outputIfSingle":true,"outputIfAll":false,"globalHeaders":{"Content-Type":"multipart/x-mixed-replace;boundary=--myboundary","Connection":"keep-alive","Expires":"Fri, 01 Jan 1990 00:00:00 GMT","Cache-Control":"no-cache, no-store, max-age=0, must-revalidate","Pragma":"no-cache"},"partHeaders":{"Content-Type":"image/jpeg"},"destination":"all","x":1840,"y":300,"wires":[[]]},{"id":"bd955688.623878","type":"http request","z":"15244fe6.9ae87","name":"HttpRequest to get image","method":"GET","ret":"bin","url":"","tls":"","x":1610,"y":300,"wires":[["cc1feca1.b909b"]]},{"id":"da39d7.4e70f628","type":"function","z":"15244fe6.9ae87","name":"Next image url","func":"var counter = global.get(\"image_counter\") || 0; \ncounter++;\nglobal.set(\"image_counter\",counter);\n\nmsg.url = 'https://dummyimage.com/400x200/fff/000&text=PNG+' + counter;\n\nreturn msg;","outputs":1,"noerr":0,"x":1380,"y":300,"wires":[["bd955688.623878"]]},{"id":"435929ff.b35c18","type":"inject","z":"15244fe6.9ae87","name":"Every second","topic":"","payload":"","payloadType":"date","repeat":"1","crontab":"","once":false,"x":1037.9999885559082,"y":299.9999990463257,"wires":[["58d2c398.976efc"]]},{"id":"5a5de18d.2ef8a","type":"inject","z":"15244fe6.9ae87","name":"Stop stream","topic":"","payload":"","payloadType":"date","repeat":"","crontab":"","once":false,"onceDelay":"","x":1450,"y":360,"wires":[["bca25c2b.4079f"]]},{"id":"bca25c2b.4079f","type":"change","z":"15244fe6.9ae87","name":"","rules":[{"t":"set","p":"stop","pt":"msg","to":"true","tot":"bool"}],"action":"","property":"","from":"","to":"","reg":false,"x":1650,"y":360,"wires":[["cc1feca1.b909b"]]},{"id":"a39192ce.80e4b","type":"inject","z":"15244fe6.9ae87","name":"Pause stream","topic":"","payload":"true","payloadType":"bool","repeat":"","crontab":"","once":false,"onceDelay":"","x":1450,"y":400,"wires":[["d1bced7a.5790c"]]},{"id":"d84c646e.088fd8","type":"inject","z":"15244fe6.9ae87","name":"Resume stream","topic":"","payload":"false","payloadType":"bool","repeat":"","crontab":"","once":true,"onceDelay":"","x":1460,"y":440,"wires":[["d1bced7a.5790c"]]},{"id":"58d2c398.976efc","type":"switch","z":"15244fe6.9ae87","name":"","property":"streamPaused","propertyType":"flow","rules":[{"t":"false"}],"checkall":"true","repair":false,"outputs":1,"x":1210,"y":300,"wires":[["da39d7.4e70f628"]]},{"id":"d1bced7a.5790c","type":"change","z":"15244fe6.9ae87","name":"","rules":[{"t":"set","p":"streamPaused","pt":"flow","to":"payload","tot":"msg"}],"action":"","property":"","from":"","to":"","reg":false,"x":1680,"y":400,"wires":[[]]}]
 ```
-        
-#### Same stream to 'all clients'
+
+### Same stream to 'all clients'
 
 Watching camera images from a Node-Red flow, is an example of an *infinite stream*.  The flow generates an endless stream of data, and all clients hook in to the same existing stream: clients are not interested in the previous old data (they only want to see the current camera images).  
 
@@ -77,11 +81,7 @@ The clients are connecting at different times, but they all get the entire strea
 
 ![Stream single result](https://raw.githubusercontent.com/bartbutenaers/node-red-contrib-multipart-stream/master/images/stream_all_result.png)
 
-When all data has been send to the encoder, end the stream by a message with `msg.stop` = true.  As a result, the encoder will stop the http response (which is specified in the `msg.res` field).  Otherwise the client keeps waiting for data, while the stream has already ended (since all data has been streamed already).  E.g. in Chrome the tabsheet will have contain a spinning wheel as long as the response is not yet complete:
-
-![Stream tabsheets](https://raw.githubusercontent.com/bartbutenaers/node-red-contrib-multipart-stream/master/images/stream_tabsheets.png)
-
-Make sure that ***all messages have `msg.res` field !***  Reason is that the encoder should know to which client the image (in the `msg.payload`) needs to be send.  This can be accomplished by passing the response object from the HttpIn node.
+Make sure that ***all messages have `msg.res` field*** (containing the HttpIn node's response)!  Reason is that the encoder should know to which client the image (in the `msg.payload`) needs to be send.  This can be accomplished by passing the response object from the HttpIn node.
 
 ### Keeping track of active connections
 
@@ -120,13 +120,13 @@ By keeping track of the active connections, the flow can decide whether is it us
 ### Adaptive streaming
 When we are sending lots of messages to the encoder node (containing lots of data in the payloads), we would run into troubles if the stream cannot handle all that data.  For example if we have a slow network or a slow client system.  In that case the ***stream buffer*** would start growing until all memory would be consumed.  At the end our system would stop functioning correctly.
 
-This can be solved by enabling the 'Ignore messages if stream is overloaded' checkbox on the config screen.  When the stream cannot process all messages, the encoder node will start ignoring input messages.  As soon as the stream is again ready to process new data, the encoder node will again start processing input messages.  For example for MJPEG streaming, it is better to send less images than to have a malfunctioning system...  
+This can be solved by enabling the *'Ignore messages if stream is overloaded'* checkbox on the config screen.  When the stream cannot process all messages, the encoder node will start ignoring input messages.  As soon as the stream is again ready to process new data, the encoder node will again start processing input messages.  For example for MJPEG streaming, it is better to send less images than to have a malfunctioning system...  
 
 This option can be disabled if there is a short burst of images, and all of those images should be sended.  But make sure that you don't overload your system.
 
 By default the *stream buffer size* is 16 Kbyte in NodeJs, and is called the *high water mark*.  This default ***memory limit*** can be changed in the encoder's config screen.  E.g. when working with images, the 16 Kbyte would be exceeded all the time (since a single image will already exceed 16 Kbyte).
 
-### Node status
+## Node status
 The node status displays the number of active client connections:
 
 ![Stream tabsheets](https://raw.githubusercontent.com/bartbutenaers/node-red-contrib-multipart-stream/master/images/stream_status_count.png)
@@ -147,7 +147,7 @@ Such high data rates cannot be reached by sending a request for every image:
 1. Wait for response image 2
 1. ...
 
-Indeed this would result in too much overhead: we would have to wait all the time, some devices cannot handle the overflow of http requests, ...
+Indeed this would result in too much overhead: we would have to wait all the time.  Moreover some devices cannot handle the overflow of http requests, ...
 
 In this case (http) streaming is preferred.  We send a ***single*** (http) request, and the response will be an (in)finite stream of images.  A *boundary* string will be used as a separator between the images:
 - global headers  
@@ -179,17 +179,17 @@ By default, all required http headers (on both levels) will be available in the 
 To explain why this encoder node might be handy, let's go through all the available solutions to display video streams in your dashboard:
 
 ### Dashboard gets MJPEG stream directly from IP camera
-In this case the images don't pass through the Node-Red flow.  This can be implemented easily with a simple flow that only contains a single Template node, which puts an image element on the dashboard (with the camera URL as source):
+In this case the images don't pass through the Node-Red flow.  This can be implemented easily with a simple flow that only contains a single Template node, which puts an \<img\> element on the dashboard (with the camera URL as source):
 
 ![Stream directly flow](https://raw.githubusercontent.com/bartbutenaers/node-red-contrib-multipart-stream/master/images/stream_directly_flow.png)
 ```
 [{"id":"4e44e10.85d262","type":"ui_template","z":"47b91ceb.38a754","group":"16a1f12d.07c69f","name":"Display image","order":1,"width":"6","height":"6","format":"<img width=\"16\" height=\"16\" src=\"http://200.36.58.250/mjpg/video.mjpg?resolution=640x480\" />\n","storeOutMessages":true,"fwdInMessages":true,"templateScope":"local","x":920,"y":1360,"wires":[[]]},{"id":"16a1f12d.07c69f","type":"ui_group","z":"","name":"Default","tab":"f136a522.adc2a8","order":1,"disp":true,"width":"6"},{"id":"f136a522.adc2a8","type":"ui_tab","z":"","name":"Home","icon":"home","order":1}]
 ```
-As a result the dashboard html page will contain an image (img) element, which gets its images directly from the IP camera MJPEG stream:
+As a result the dashboard html page will contain an \<img\> element, which gets its images directly from the IP camera MJPEG stream:
  
 ![Stream directly dashboard](https://raw.githubusercontent.com/bartbutenaers/node-red-contrib-multipart-stream/master/images/stream_directly_dashboard.png)
      
-1. The image element requests an MJPEG stream from the IP camera.  
+1. The \<img\> element requests an MJPEG stream from the IP camera.  
 1. The IP camera responds by sending an endless stream of images (i.e. an MJPEG stream).  
 1. The browser will render the images (i.e. the images are displayed in the dashboard).
 
@@ -206,7 +206,7 @@ The flow could get the images from the camera (using a HttpRequest or MultipartS
 1. The IP camera responds by sending an endless stream of images (i.e. an MJPEG stream).  
 1. The flow will do some image processing and send the message (image in `msg.payload`) to the template node.  
 1. The template node will push the message - via a websocket channel - to the dashboard.  
-1. The source of the image element in the html will (constantly) being updated to refer to the latest image.  
+1. The source of the \<img\> element in the html will (constantly) being updated to refer to the latest image.  
 1. The browser will render the images (i.e. the images are displayed in the dashboard).
     
 That is again simple and works fine.  However if you want to display multiple cameras (with higher frame rates) simultaneously, keep in mind that all the updated data (graphs, node statusses, debug panel messages, images ...) will be pushed through a single websocket channel to the dashboard! *When too much data is being pushed through that single websocket channel, the browser will start freezing*. Then this solution won't be sufficient ... 
@@ -214,7 +214,7 @@ That is again simple and works fine.  However if you want to display multiple ca
 ### Dashboard gets MJPEG stream via the Node-Red flow
 The flow could get the images from the camera (using a HttpRequest or MultipartStreamDecoder node), do some image processing and afterwards the dashboard will request the manipulated images stream from the flow.
 
-This means that the dashboard should be setup with a single template node, similar to the first alternative.  However the image needs to be requested fro the Node-Red flow (instead of from the IP camera), so the Node-Red flow IP address should be specified:
+This means that the dashboard should be setup with a single template node, similar to the first alternative.  However the image needs to be requested from the Node-Red flow (instead of from the IP camera), so the Node-Red flow IP address should be specified:
    
 ![Stream via NR dashboard](https://raw.githubusercontent.com/bartbutenaers/node-red-contrib-multipart-stream/master/images/stream_via_nodered_flow.png)
 
@@ -225,7 +225,7 @@ The encoder node allows us to create a Node-Red flow that behaves like an IP cam
 1. The flow requests an MJPEG stream from the IP camera.  
 1. The IP camera responds by sending an endless stream of images (i.e. an MJPEG stream).  
 1. The flow will do some image processing and send the message (image in `msg.payload`) to the encoder node.  
-1. The image element in the html will request an MJPEG stream from the flow.  The ExpressJs webserver will send the request to the HttpIn node, since the URL contains '/videostream'.
+1. The \<img\> element in the html will request an MJPEG stream from the flow.  The ExpressJs webserver will send the request to the HttpIn node, since the URL contains '/videostream'.
 1. The HttpIn node forwards the request (wrapped in a message) to the encoder node.  
 1. The encoder node creates an MJPEG stream from all the images, and sends that stream to the dashboard.  
 1. The browser will render the images (i.e. the images are displayed in the dashboard).
